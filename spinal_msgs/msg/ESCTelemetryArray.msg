@@ -1,0 +1,6 @@
+builtin_interfaces/Time stamp
+# spinal_msgs/ESCTelemetry[] esc_telemetry_array
+spinal_msgs/ESCTelemetry esc_telemetry_1
+spinal_msgs/ESCTelemetry esc_telemetry_2
+spinal_msgs/ESCTelemetry esc_telemetry_3
+spinal_msgs/ESCTelemetry esc_telemetry_4
