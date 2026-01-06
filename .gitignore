@@ -1,0 +1,7 @@
+*.elf
+*.hex
+*.list
+*.map
+#*.xml
+language.settings.xml
+*~
