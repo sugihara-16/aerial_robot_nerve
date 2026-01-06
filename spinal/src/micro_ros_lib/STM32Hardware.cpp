@@ -45,6 +45,28 @@ void HAL_UART_ErrorCallback(UART_HandleTypeDef *huart)
     }
 }
 
+void STM32Hardware::deinit()
+{
+  if (huart_ == NULL) return;
+
+  HAL_UART_DMAStop(huart_);
+  (void)HAL_UART_AbortReceive(huart_);
+  (void)HAL_UART_AbortTransmit(huart_);
+
+  uart_rxdma_rd_ptr_ = 0;
+
+  uart_tx_subscript_in_progress_ = 0;
+  uart_tx_subscript_to_add_ = 0;
+
+  for(int i = 0; i < TX_BUFFER_SIZE; i++)
+    {
+      uart_tx_buffer_unit_[i].tx_len_ = 1;
+      memset(uart_tx_buffer_unit_[i].tx_data_, 0, TX_BUFFER_WIDTH);
+    }
+
+  memset(rx_buf_.getBuf(), 0, RX_BUFFER_SIZE);
+}
+
 void STM32Hardware::init(UART_HandleTypeDef *huart, osMutexId *mutex, osSemaphoreId  *semaphore)
 {
   rtos_mode_ = true;
@@ -58,8 +80,10 @@ void STM32Hardware::init(UART_HandleTypeDef *huart, osMutexId *mutex, osSemaphor
   __HAL_UART_DISABLE_IT(huart, UART_IT_IDLE);
 
   /* rx */
-  HAL_UART_Receive_DMA(huart, rx_buf_.getBuf(), RX_BUFFER_SIZE);
+  HAL_UART_DMAStop(huart);
   memset(rx_buf_.getBuf(), 0, RX_BUFFER_SIZE);
+  HAL_UART_Receive_DMA(huart, rx_buf_.getBuf(), RX_BUFFER_SIZE);
+ uart_rxdma_rd_ptr_ = 0;
 
   /* tx */
   tx_mutex_ = mutex;
@@ -145,7 +169,10 @@ int STM32Hardware::read()
         {
           __HAL_UART_CLEAR_FLAG(huart_,
                                 UART_CLEAR_NEF | UART_CLEAR_OREF | UART_FLAG_RXNE | UART_FLAG_ORE);
+          HAL_UART_DMAStop(huart_);
+          memset(rx_buf_.getBuf(), 0, RX_BUFFER_SIZE);
           HAL_UART_Receive_DMA(huart_, rx_buf_.getBuf(), RX_BUFFER_SIZE);
+          uart_rxdma_rd_ptr_ = (RX_BUFFER_SIZE - __HAL_DMA_GET_COUNTER(huart_->hdmarx)) % (RX_BUFFER_SIZE);
         }
 
 
@@ -192,6 +219,11 @@ int STM32Hardware::publish()
               // use DMA with semaphore
               osSemaphoreWait(*tx_semaphore_, osWaitForever);
               status = HAL_UART_Transmit_DMA(huart_, uart_tx_buffer_unit_[uart_tx_subscript_in_progress_].tx_data_, uart_tx_buffer_unit_[uart_tx_subscript_in_progress_].tx_len_);
+              if (status != HAL_OK)
+                {
+                  osSemaphoreRelease (*tx_semaphore_);
+                  return status;
+                }
             }
 
           /* mutex to avoid access from task of higher priority running "write" */
@@ -273,5 +305,3 @@ void STM32Hardware::write(uint8_t * new_data, uint16_t new_size)
     }
 #endif
 }
-
-

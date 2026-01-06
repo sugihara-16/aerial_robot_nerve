@@ -31,6 +31,7 @@ static TransportContext g_transport;
  */
 static bool transport_open(struct uxrCustomTransport * /*transport*/)
 {
+  g_transport.hw.deinit();
   g_transport.hw.init(&huart1, &rosPubMutexHandle, &uartTxSemHandle);
   return true;
 }
@@ -42,6 +43,7 @@ static bool transport_open(struct uxrCustomTransport * /*transport*/)
  */
 static bool transport_close(struct uxrCustomTransport * /*transport*/)
 {
+  g_transport.hw.deinit();
   return true;
 }
 
@@ -135,6 +137,7 @@ static size_t transport_write(struct uxrCustomTransport * /*transport*/,
       }
       /* HAL_OK or error both can lead to semaphore release via callbacks.
          Stability-first: keep flushing. */
+      osDelay(1);
     }
 
     sent += chunk;

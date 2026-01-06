@@ -9,8 +9,12 @@
 #ifndef STMH32_HARDWARE_H_
 #define STMH32_HARDWARE_H_
 
-#define SUPPORT_RTOS 0
+#ifndef SUPPORT_RTOS
+#define SUPPORT_RTOS 1
+#endif
+#ifndef SUPPORT_LWIP
 #define SUPPORT_LWIP 0
+#endif
 
 #if defined (STM32F756xx) || defined (STM32F746xx) || defined (STM32F745xx) || defined (STM32F765xx) || \
     defined (STM32F767xx) || defined (STM32F769xx) || defined (STM32F777xx) || defined (STM32F779xx) || \
@@ -183,6 +187,7 @@ public:
 
 #if SUPPORT_RTOS
   void init(UART_HandleTypeDef* huart, osMutexId* mutex, osSemaphoreId  *semaphore);
+  void deinit();
   
 #endif
 

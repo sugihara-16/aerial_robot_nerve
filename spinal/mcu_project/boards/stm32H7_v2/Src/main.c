@@ -33,6 +33,7 @@
 #include <rcl/rcl.h>
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
+#include <rmw_microros/rmw_microros.h>
 
 #include <std_msgs/msg/u_int32.h>
 #include <std_msgs/msg/u_int8.h>
@@ -196,6 +197,11 @@ static void microros_init_all(void)
 {
   // 1) Register custom transport (must be done before rclc_support_init)
   microros_transport_init();
+  
+  while (rmw_uros_ping_agent(100, 1) != RMW_RET_OK)
+    {
+      osDelay(100);
+    }
 
   // 2) Init rcl/rclc
   allocator = rcl_get_default_allocator();
@@ -225,6 +231,15 @@ static void microros_init_all(void)
       &msg_led,
       &led_callback,
       ON_NEW_DATA);
+}
+
+static void microros_fini_all(void)
+{
+  (void)rclc_executor_fini(&executor);
+  (void)rcl_subscription_fini(&sub_led, &node);
+  (void)rcl_publisher_fini(&pub_uptime, &node);
+  (void)rcl_node_fini(&node);
+  (void)rclc_support_fini(&support);
 }
 /* USER CODE END 0 */
 
@@ -1322,15 +1337,29 @@ void rosSpinTaskFunc(void const * argument)
   /* USER CODE BEGIN rosSpinTaskFunc */
   (void)argument;
   
-  microros_init_all();
-
   uint32_t last_pub = HAL_GetTick();
+  uint32_t last_ping = HAL_GetTick();
+
+  microros_init_all();
 
   for (;;)
     {
-      rclc_executor_spin_some(&executor, RCL_MS_TO_NS(1));
-
       uint32_t now = HAL_GetTick();
+
+      if ((now - last_ping) >= 500)
+        {
+          if (rmw_uros_ping_agent(100, 1) != RMW_RET_OK)
+            {
+              microros_fini_all();
+              microros_init_all();
+              last_pub = HAL_GetTick();
+              last_ping = last_pub;
+              continue;
+            }
+          last_ping = now;
+        }
+
+      rclc_executor_spin_some(&executor, RCL_MS_TO_NS(1));
 
       if ((now - last_pub) >= 100) // 10Hz
         {
