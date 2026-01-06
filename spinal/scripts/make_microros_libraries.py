@@ -214,9 +214,9 @@ def main() -> None:
         help="Path to spinal_msgs package (default inferred under aerial_robot_nerve/spinal_msgs).",
     )
     ap.add_argument(
-        "--stm32-proj",
+        "--stm32-lib",
         type=Path,
-        default=inferred_nerve_root / "spinal/mcu_project/boards/stm32H7_v2",
+        default=inferred_nerve_root / "spinal/mcu_project/lib",
         help="STM32 project root directory (default inferred under aerial_robot_nerve/spinal/mcu_project/boards/stm32H7_v2).",
     )
     ap.add_argument(
@@ -249,9 +249,9 @@ def main() -> None:
     spinal_msgs_src = args.spinal_msgs.expanduser().resolve()
     validate_ros_interface_pkg(spinal_msgs_src)
 
-    stm32_proj: Path = args.stm32_proj.expanduser().resolve()
-    if not stm32_proj.is_dir():
-        raise SystemExit(f"[error] stm32-proj not found: {stm32_proj}")
+    stm32_lib: Path = args.stm32_lib.expanduser().resolve()
+    if not stm32_lib.is_dir():
+        raise SystemExit(f"[error] stm32-proj not found: {stm32_lib}")
 
     extra_dir = (ws_src / args.microros_extra_dir).resolve()
     repos_yaml = extra_dir / "extra_packages.repos"
@@ -292,7 +292,7 @@ def main() -> None:
     print(f"[info] libmicroros.a: {lib_path}")
     print(f"[info] include dir : {include_dir}")
 
-    stage_root = stm32_proj / args.stage_subdir
+    stage_root = stm32_lib / args.stage_subdir
     if args.clean_stage and stage_root.exists():
         remove_if_exists(stage_root)
 
@@ -306,7 +306,7 @@ def main() -> None:
     copy_tree(include_dir, inc_dst_dir)
 
     spinal_pkg_dir = (ws_src / "aerial_robot_nerve" / "spinal").resolve()
-    stm32_microros_dir = (stm32_proj / "microros").resolve()
+    stm32_microros_dir = (stm32_lib / "microros").resolve()
 
     stage_micro_ros_lib_files(
         spinal_pkg_dir=spinal_pkg_dir,
