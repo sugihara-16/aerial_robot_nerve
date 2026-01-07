@@ -18,7 +18,7 @@
 #include "matrix3.h"
 #include "polygon.h"
 #include "quaternion.h"
-// #include "location.h"
+#include "location.h"
 
 namespace ap {
 
