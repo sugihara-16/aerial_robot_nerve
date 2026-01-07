@@ -53,6 +53,7 @@
 #include <float.h>
 #include <math.h>
 #include <string.h>
+#include <math/rotations.h>
 
 #if MATH_CHECK_INDEXES
 #include <assert.h>

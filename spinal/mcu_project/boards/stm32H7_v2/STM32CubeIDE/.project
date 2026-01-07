@@ -38,6 +38,11 @@
 			<locationURI>$%7BPARENT-1-PROJECT_LOC%7D/spinal.ioc</locationURI>
 		</link>
 		<link>
+			<name>Application/My_Lib</name>
+			<type>2</type>
+			<locationURI>PARENT-3-PROJECT_LOC/lib/My_Lib</locationURI>
+		</link>
+		<link>
 			<name>Application/microros</name>
 			<type>2</type>
 			<locationURI>PARENT-3-PROJECT_LOC/lib/microros</locationURI>
