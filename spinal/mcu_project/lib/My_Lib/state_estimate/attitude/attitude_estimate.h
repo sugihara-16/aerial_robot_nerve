@@ -11,11 +11,11 @@
 #ifndef __ATTITUDE_ESTIMATE_H
 #define __ATTITUDE_ESTIMATE_H
 #ifndef SIMULATION
-// #include "config.h"
-// #include <math/AP_Math.h>
+#include "config.h"
+#include <math/AP_Math.h>
 
 // /* ros */
-// #include <ros.h>
+#include <ros.h>
 #else
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
@@ -29,9 +29,9 @@
 #ifdef SIMULATION
 #include <tf2/LinearMath/Matrix3x3.h>
 #else
-// #include "sensors/imu/drivers/mpu9250/imu_mpu9250.h"
-// #include "sensors/imu/drivers/icm20948/icm_20948.h"
-// #include "sensors/gps/gps_ublox.h"
+#include "sensors/imu/drivers/mpu9250/imu_mpu9250.h"
+#include "sensors/imu/drivers/icm20948/icm_20948.h"
+#include "sensors/gps/gps_ublox.h"
 #endif
 
 /* estiamtor algorithm */
@@ -96,56 +96,56 @@ class AttitudeEstimate {
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<spinal_msgs::msg::Imu>> getImuPub() { return imu_pub_; }
 
 #else
-//   AttitudeEstimate():
-//     imu_pub_("imu", &imu_msg_),
-//     mag_declination_srv_("mag_declination", &AttitudeEstimate::magDeclinationCallback,this)
-//   {}
+  AttitudeEstimate():
+    imu_pub_("imu", &imu_msg_),
+    mag_declination_srv_("mag_declination", &AttitudeEstimate::magDeclinationCallback,this)
+  {}
 
-//   void init(IMU* imu, GPS* gps, ros::NodeHandle* nh)
-//   {
-//     nh_ = nh;
-//     nh_->advertise(imu_pub_);
-//     nh_->advertiseService(mag_declination_srv_);
+  void init(IMU* imu, GPS* gps, ros::NodeHandle* nh)
+  {
+    nh_ = nh;
+    nh_->advertise(imu_pub_);
+    nh_->advertiseService(mag_declination_srv_);
 
-//     imu_ = imu;
-//     gps_ = gps;
+    imu_ = imu;
+    gps_ = gps;
 
-//     last_imu_pub_time_ = HAL_GetTick();
-//     last_attitude_pub_time_ = HAL_GetTick();
-//     use_ground_truth_ = false;
+    last_imu_pub_time_ = HAL_GetTick();
+    last_attitude_pub_time_ = HAL_GetTick();
+    use_ground_truth_ = false;
 
-// #if ESTIMATE_TYPE == COMPLEMENTARY
-//     estimator_ = new ComplementaryAHRS();
-// #elif ESTIMATE_TYPE == MADWICK
-//     estimator_ = new MadgwickAHRS();
-// #else
-// #error "no instance for estimator"
-// #endif
-//   }
+#if ESTIMATE_TYPE == COMPLEMENTARY
+    estimator_ = new ComplementaryAHRS();
+#elif ESTIMATE_TYPE == MADWICK
+    estimator_ = new MadgwickAHRS();
+#else
+#error "no instance for estimator"
+#endif
+  }
 
-//   void update()
-//   {
-//     if(gps_)
-//       {
-//         if(gps_->getMagValid() && !estimator_->getMagDecValid())
-//           {
-//             /* update magnetic declination by GPS receive data */
-//             estimator_->setMagDeclination(gps_->getMagDeclination());
-//           }
-//       }
+  void update()
+  {
+    if(gps_)
+      {
+        if(gps_->getMagValid() && !estimator_->getMagDecValid())
+          {
+            /* update magnetic declination by GPS receive data */
+            estimator_->setMagDeclination(gps_->getMagDeclination());
+          }
+      }
 
-//     if(imu_->getUpdate())
-//       {
-//         /* attitude estimation */
-//         estimator_->update(imu_->getGyro(), imu_->getAcc(), imu_->getMag());
+    if(imu_->getUpdate())
+      {
+        /* attitude estimation */
+        estimator_->update(imu_->getGyro(), imu_->getAcc(), imu_->getMag());
 
-//         /* send message to ros*/
-//         if(nh_->connected())  publish();
+        /* send message to ros*/
+        if(nh_->connected())  publish();
 
-//         /* reset update status of imu*/
-//         imu_->setUpdate(false);
-//       }
-//   }
+        /* reset update status of imu*/
+        imu_->setUpdate(false);
+      }
+  }
 #endif
 
   /* send message via ros protocol */
@@ -176,7 +176,7 @@ class AttitudeEstimate {
 #ifdef SIMULATION
       imu_pub_->publish(imu_msg_);
 #else
-      // imu_pub_.publish(&imu_msg_);
+      imu_pub_.publish(&imu_msg_);
 #endif
     }
   }
@@ -217,36 +217,36 @@ class AttitudeEstimate {
 
   EstimatorAlgorithm* estimator_;
 #ifndef SIMULATION
-  // IMU* imu_;
-  // GPS* gps_;
+  IMU* imu_;
+  GPS* gps_;
 
-  // /* mag declination */
-  // ros::ServiceServer<spinal::MagDeclination::Request, spinal::MagDeclination::Response, AttitudeEstimate>
-  // mag_declination_srv_;
+  /* mag declination */
+  ros::ServiceServer<spinal::MagDeclination::Request, spinal::MagDeclination::Response, AttitudeEstimate>
+  mag_declination_srv_;
 
-  // void magDeclinationCallback(const spinal::MagDeclination::Request& req, spinal::MagDeclination::Response& res)
-  // {
-  //   switch (req.command)
-  //     {
-  //     case spinal::MagDeclination::Request::GET_DECLINATION:
-  //       {
-  //         res.data = estimator_->getMagDeclination();
-  //         res.success = true;
-  //         break;
-  //       }
-  //     case spinal::MagDeclination::Request::SET_DECLINATION:
-  //       {
-  //         /* update the magnetic declination */
-  //         estimator_->setMagDeclination(req.data);
-  //         res.success = true;
-  //         break;
-  //       }
-  //     default:
-  //       {
-  //         break;
-  //       }
-  //     }
-  // }
+  void magDeclinationCallback(const spinal::MagDeclination::Request& req, spinal::MagDeclination::Response& res)
+  {
+    switch (req.command)
+      {
+      case spinal::MagDeclination::Request::GET_DECLINATION:
+        {
+          res.data = estimator_->getMagDeclination();
+          res.success = true;
+          break;
+        }
+      case spinal::MagDeclination::Request::SET_DECLINATION:
+        {
+          /* update the magnetic declination */
+          estimator_->setMagDeclination(req.data);
+          res.success = true;
+          break;
+        }
+      default:
+        {
+          break;
+        }
+      }
+  }
 
 #else
   ap::Vector3f acc_, mag_, gyro_;
