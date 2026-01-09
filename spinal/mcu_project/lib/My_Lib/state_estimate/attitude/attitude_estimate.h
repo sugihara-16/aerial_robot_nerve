@@ -15,15 +15,24 @@
 #include <math/AP_Math.h>
 
 // /* ros */
-#include <ros.h>
+#include <rcl/rcl.h>
+#include <rclc/rclc.h>
+#include <rclc/executor.h>
+#include <rosidl_runtime_c/message_type_support_struct.h>
+#include <rmw_microros/rmw_microros.h>
 #else
 #include <rclcpp/rclcpp.hpp>
 #include <rclcpp_lifecycle/lifecycle_node.hpp>
 #endif
 
+#ifdef SIMULATION
 #include <geometry_msgs/msg/vector3_stamped.hpp>
 #include <spinal_msgs/msg/desire_coord.hpp>
 #include <spinal_msgs/msg/imu.hpp>
+#else
+#include <spinal_msgs/msg/imu.h>
+#include <spinal_msgs/srv/mag_declination.h>
+#endif
 
 /* sensors */
 #ifdef SIMULATION
@@ -46,6 +55,15 @@
 
 /* please change the algorithm type according to your application */
 #define ESTIMATE_TYPE COMPLEMENTARY
+
+#ifndef SIMULATION
+class AttitudeEstimate;
+namespace
+{
+  extern AttitudeEstimate* attitude_instance_;
+  void magDeclinationCallbackStatic(const void * req_msg, void * res_msg);
+}
+#endif
 
 class AttitudeEstimate {
  public:
@@ -96,16 +114,34 @@ class AttitudeEstimate {
   std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<spinal_msgs::msg::Imu>> getImuPub() { return imu_pub_; }
 
 #else
-  AttitudeEstimate():
-    imu_pub_("imu", &imu_msg_),
-    mag_declination_srv_("mag_declination", &AttitudeEstimate::magDeclinationCallback,this)
+  AttitudeEstimate()
   {}
 
-  void init(IMU* imu, GPS* gps, ros::NodeHandle* nh)
+  void init(IMU* imu, GPS* gps, rcl_node_t* node, rclc_executor_t* executor)
   {
-    nh_ = nh;
-    nh_->advertise(imu_pub_);
-    nh_->advertiseService(mag_declination_srv_);
+    node_ = node;
+    executor_ = executor;
+
+    rclc_publisher_init_default(
+      &imu_pub_,
+      node_,
+      ROSIDL_GET_MSG_TYPE_SUPPORT(spinal_msgs, msg, Imu),
+      "imu");
+
+    rclc_service_init_default(
+      &mag_declination_srv_,
+      node_,
+      ROSIDL_GET_SRV_TYPE_SUPPORT(spinal_msgs, srv, MagDeclination),
+      "mag_declination");
+
+    rclc_executor_add_service(
+      executor_,
+      &mag_declination_srv_,
+      &mag_declination_req_,
+      &mag_declination_res_,
+      magDeclinationCallbackStatic);
+
+    attitude_instance_ = this;
 
     imu_ = imu;
     gps_ = gps;
@@ -140,7 +176,7 @@ class AttitudeEstimate {
         estimator_->update(imu_->getGyro(), imu_->getAcc(), imu_->getMag());
 
         /* send message to ros*/
-        if(nh_->connected())  publish();
+        publish();
 
         /* reset update status of imu*/
         imu_->setUpdate(false);
@@ -157,7 +193,11 @@ class AttitudeEstimate {
 #ifdef SIMULATION
       imu_msg_.stamp = node_->get_clock()->now();
 #else
-      // imu_msg_.stamp = nh_->now();
+      {
+        uint64_t t_ms = rmw_uros_epoch_millis();
+        imu_msg_.stamp.sec = (int32_t)(t_ms / 1000ULL);
+        imu_msg_.stamp.nanosec = (uint32_t)((t_ms % 1000ULL) * 1000000ULL);
+      }
 #endif
       // sensor values
       for (int i = 0; i < 3; i++) {
@@ -176,7 +216,7 @@ class AttitudeEstimate {
 #ifdef SIMULATION
       imu_pub_->publish(imu_msg_);
 #else
-      imu_pub_.publish(&imu_msg_);
+      rcl_publish(&imu_pub_, &imu_msg_, NULL);
 #endif
     }
   }
@@ -203,38 +243,17 @@ class AttitudeEstimate {
     ground_truth_ang_vel_ = ang_vel;
   }
 
-  static const uint8_t IMU_PUB_INTERVAL = 5;  // 10-> 100Hz, 2 -> 500Hz
-
- private:
-#ifdef SIMULATION
-  std::shared_ptr<rclcpp_lifecycle::LifecycleNode> node_;  // ROS2 node handle
-  std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<spinal_msgs::msg::Imu>> imu_pub_;
-#else
-  rclcpp::Node::SharedPtr node_;  // ROS2 node handle
-  rclcpp::Publisher<spinal_msgs::msg::Imu>::SharedPtr imu_pub_;
-#endif
-  spinal_msgs::msg::Imu imu_msg_;
-
-  EstimatorAlgorithm* estimator_;
-#ifndef SIMULATION
-  IMU* imu_;
-  GPS* gps_;
-
-  /* mag declination */
-  ros::ServiceServer<spinal::MagDeclination::Request, spinal::MagDeclination::Response, AttitudeEstimate>
-  mag_declination_srv_;
-
-  void magDeclinationCallback(const spinal::MagDeclination::Request& req, spinal::MagDeclination::Response& res)
+  void magDeclinationCallback(const spinal_msgs__srv__MagDeclination_Request& req, spinal_msgs__srv__MagDeclination_Response& res)
   {
     switch (req.command)
       {
-      case spinal::MagDeclination::Request::GET_DECLINATION:
+      case spinal_msgs__srv__MagDeclination_Request__GET_DECLINATION:
         {
           res.data = estimator_->getMagDeclination();
           res.success = true;
           break;
         }
-      case spinal::MagDeclination::Request::SET_DECLINATION:
+      case spinal_msgs__srv__MagDeclination_Request__SET_DECLINATION:
         {
           /* update the magnetic declination */
           estimator_->setMagDeclination(req.data);
@@ -248,6 +267,29 @@ class AttitudeEstimate {
       }
   }
 
+  static const uint8_t IMU_PUB_INTERVAL = 5;  // 10-> 100Hz, 2 -> 500Hz
+
+ private:
+#ifdef SIMULATION
+  std::shared_ptr<rclcpp_lifecycle::LifecycleNode> node_;  // ROS2 node handle
+  std::shared_ptr<rclcpp_lifecycle::LifecyclePublisher<spinal_msgs::msg::Imu>> imu_pub_;
+#else
+  rcl_node_t* node_;
+  rclc_executor_t* executor_;
+  rcl_publisher_t imu_pub_;
+#endif
+  spinal_msgs__msg__Imu imu_msg_;
+
+  EstimatorAlgorithm* estimator_;
+  
+#ifndef SIMULATION
+  IMU* imu_;
+  GPS* gps_;
+
+  rcl_service_t mag_declination_srv_;
+  spinal_msgs__srv__MagDeclination_Request mag_declination_req_;
+  spinal_msgs__srv__MagDeclination_Response mag_declination_res_;
+
 #else
   ap::Vector3f acc_, mag_, gyro_;
   uint32_t HAL_GetTick() { return (uint32_t)(node_->get_clock()->now().seconds() * 1000); }
@@ -259,4 +301,22 @@ class AttitudeEstimate {
   ap::Matrix3f ground_truth_rot_;
   ap::Vector3f ground_truth_ang_vel_;
 };
+
+#ifndef SIMULATION
+namespace
+{
+  AttitudeEstimate* attitude_instance_ = nullptr;
+
+  void magDeclinationCallbackStatic(const void * req_msg, void * res_msg)
+  {
+    if(attitude_instance_ == nullptr) return;
+    if(req_msg == nullptr) return;
+    if(res_msg == nullptr) return;
+    attitude_instance_->magDeclinationCallback(
+      *reinterpret_cast<const spinal_msgs__srv__MagDeclination_Request*>(req_msg),
+      *reinterpret_cast<spinal_msgs__srv__MagDeclination_Response*>(res_msg));
+  }
+}
+#endif
+
 #endif

@@ -11,16 +11,18 @@
 #ifndef __ATTITUDE_ESTIMATOR_H
 #define __ATTITUDE_ESTIMATOR_H
 
-#include <math.h>
-#include <math/AP_Math.h>
 #include <stdint.h>
 #include <stdio.h>
-
+#include <math.h>
+#include <math/AP_Math.h>
 #include <array>
+
+#ifdef SIMULATION
 #include <rclcpp/rclcpp.hpp>
+#endif
 
 #ifndef SIMULATION
-// #include "flashmemory/flashmemory.h"
+#include "flashmemory/flashmemory.h"
 #define DELTA_T 0.001f
 #endif
 
@@ -33,7 +35,7 @@ class EstimatorAlgorithm {
 #ifdef SIMULATION
     prev_time = -1;
 #else
-    // FlashMemory::addValue(&mag_declination_, sizeof(float));
+    FlashMemory::addValue(&mag_declination_, sizeof(float));
 #endif
     mag_dec_rot_.from_euler(0, 0, -mag_declination_);  // the mag declination has positive value in WC direction, which
                                                        // is opposite with euler frame
@@ -72,15 +74,15 @@ class EstimatorAlgorithm {
   virtual ap::Quaternion getQuaternion() = 0;
 
 #ifndef SIMULATION
-  // bool getMagDecValid() { return mag_dec_valid_; }
-  // float getMagDeclination() { return mag_declination_;}
-  // void setMagDeclination(float mag_dec)
-  // {
-  //   mag_declination_ = mag_dec;
-  //   FlashMemory::erase();
-  //   FlashMemory::write();
-  //   mag_dec_valid_ = true;
-  // }
+  bool getMagDecValid() { return mag_dec_valid_; }
+  float getMagDeclination() { return mag_declination_;}
+  void setMagDeclination(float mag_dec)
+  {
+    mag_declination_ = mag_dec;
+    FlashMemory::erase();
+    FlashMemory::write();
+    mag_dec_valid_ = true;
+  }
 #endif
 
  protected:

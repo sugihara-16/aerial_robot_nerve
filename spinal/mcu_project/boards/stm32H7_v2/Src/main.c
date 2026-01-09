@@ -40,21 +40,20 @@
 /* #include <std_msgs/String.h> */
 /* #include <std_msgs/Empty.h> */
 /* #include <spinal/ServoControlCmd.h> */
-/* #include <spinal/Imu.h> */
+#include <spinal_msgs/msg/imu.h>
 
-/* #include "flashmemory/flashmemory.h" */
-/* #include "sensors/imu/drivers/mpu9250/imu_mpu9250.h" */
-/* #include "sensors/imu/drivers/icm20948/icm_20948.h" */
-/* #include "sensors/imu/imu_ros_cmd.h" */
-/* #include "sensors/baro/baro_ms5611.h" */
-/* #include "sensors/gps/gps_ublox.h" */
+#include "flashmemory/flashmemory.h"
+#include "sensors/imu/drivers/mpu9250/imu_mpu9250.h"
+#include "sensors/imu/drivers/icm20948/icm_20948.h"
+#include "sensors/imu/imu_ros_cmd.h"
+#include "sensors/baro/baro_ms5611.h"
+#include "sensors/gps/gps_ublox.h"
 /* #include "sensors/encoder/mag_encoder.h" */
 
 /* #include "battery_status/battery_status.h" */
-
 /* #include "servo/servo.h" */
 
-/* #include "state_estimate/state_estimate.h" */
+#include "state_estimate/state_estimate.h"
 /* #include "flight_control/flight_control.h" */
 
 /* #include <Spine/spine.h> */
@@ -132,14 +131,14 @@ static rcl_subscription_t sub_led;
 static std_msgs__msg__UInt8 msg_led;
 
 /* /\* sensor instances *\/ */
-/* #if IMU_MPU */
-/* IMUOnboard imu_; */
-/* #elif IMU_ICM */
-/* ICM20948 imu_; */
-/* #endif */
+#if IMU_MPU
+IMUOnboard imu_;
+#elif IMU_ICM
+ICM20948 imu_;
+#endif
 
-/* Baro baro_; */
-/* GPS gps_; */
+Baro baro_;
+GPS gps_;
 /* BatteryStatus battery_status_; */
 
 /* /\* servo instance *\/ */
@@ -147,7 +146,7 @@ static std_msgs__msg__UInt8 msg_led;
 /* DShot dshot_; */
 
 
-/* StateEstimate estimator_; */
+StateEstimate estimator_;
 /* FlightControl controller_; */
 
 /* USER CODE END PV */
@@ -331,16 +330,16 @@ int main(void)
 /*   FlashMemory::read(); */
 /* #endif */
 
-/*   imu_.init(&hspi1, &hi2c3, &nh_, IMUCS_GPIO_Port, IMUCS_Pin, LED0_GPIO_Port, LED0_Pin); */
-/*   IMU_ROS_CMD::init(&nh_); */
-/*   IMU_ROS_CMD::addImu(&imu_); */
-/*   baro_.init(&hi2c1, &nh_, BAROCS_GPIO_Port, BAROCS_Pin); */
-/*   gps_.init(&huart3, &nh_, LED2_GPIO_Port, LED2_Pin); */
+  imu_.init(&hspi1, &hi2c3, &node, IMUCS_GPIO_Port, IMUCS_Pin, LED0_GPIO_Port, LED0_Pin);
+  IMU_ROS_CMD::init(&node, &executor);
+  IMU_ROS_CMD::addImu(&imu_);
+  baro_.init(&hi2c1, &node, &executor, BAROCS_GPIO_Port, BAROCS_Pin);
+  gps_.init(&huart3, &node, &executor, LED2_GPIO_Port, LED2_Pin);
 
 /*   DShot* dshotptr = nullptr; */
 /* #if DSHOT */
 /*   battery_status_.init(&hadc1, &nh_, false); */
-/*   estimator_.init(&imu_, &baro_, &gps_, &nh_);  // imu + baro + gps => att + alt + pos(xy) */
+estimator_.init(&imu_, &baro_, &gps_, &node, &executor);  // imu + baro + gps => att + alt + pos(xy)
 /*   dshot_.init(DSHOT600, &htim1,TIM_CHANNEL_1, &htim1,TIM_CHANNEL_2, &htim1,TIM_CHANNEL_3, &htim1, TIM_CHANNEL_4); */
 /*   dshot_.initTelemetry(&huart6); */
 /*   dshotptr = &dshot_; */
