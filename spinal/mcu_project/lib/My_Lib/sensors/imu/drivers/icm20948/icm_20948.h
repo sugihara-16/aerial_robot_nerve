@@ -14,8 +14,6 @@
 
 #include "config.h"
 #include "sensors/imu/drivers/mpu9250/imu_mpu9250.h"
-#include <rcl/rcl.h>
-
 
 #define SENSOR_DATA_LENGTH 7
 #define IMU_FIND_TIMEOUT 10000
@@ -222,7 +220,7 @@ class ICM20948 : public IMUOnboard {
 public:
   ICM20948():IMUOnboard(){}
   ~ICM20948(){}
-  void init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c, rcl_node_t* node,
+  void init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c,
             GPIO_TypeDef* spi_cs_port, uint16_t spi_cs_pin,
             GPIO_TypeDef* led_port, uint16_t led_pin);
 

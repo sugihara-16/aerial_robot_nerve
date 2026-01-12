@@ -11,11 +11,10 @@
 
 #include "sensors/imu/drivers/icm20948/icm_20948.h"
 
-void ICM20948::init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c, rcl_node_t* node,
+void ICM20948::init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c,
                       GPIO_TypeDef* spi_cs_port, uint16_t spi_cs_pin,
                       GPIO_TypeDef* led_port, uint16_t led_pin)
 {
-  node_ = node;
   IMU::init();
 
   spi_cs_port_ = spi_cs_port;

@@ -15,7 +15,6 @@
 #include "config.h"
 #include "math/AP_Math.h"
 #include "sensors/imu/imu_basic.h"
-#include <rcl/rcl.h>
 
 #define SENSOR_DATA_LENGTH 7
 
@@ -23,7 +22,7 @@ class IMUOnboard : public IMU {
 public:
   IMUOnboard():IMU(){}
   ~IMUOnboard(){}
-  void init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c, rcl_node_t* node,
+  void init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c,
             GPIO_TypeDef* spi_cs_port, uint16_t spi_cs_pin,
             GPIO_TypeDef* led_port, uint16_t led_pin);
 
@@ -37,7 +36,6 @@ protected:
 
   SPI_HandleTypeDef* hspi_;
   I2C_HandleTypeDef* hi2c_;
-  rcl_node_t* node_;
 
   GPIO_TypeDef* spi_cs_port_;
   uint16_t spi_cs_pin_;

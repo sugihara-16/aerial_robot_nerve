@@ -13,11 +13,10 @@
 uint8_t IMUOnboard::adc_[SENSOR_DATA_LENGTH];
 uint32_t IMUOnboard::last_mag_time_;
 
-void IMUOnboard::init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c, rcl_node_t* node,
+void IMUOnboard::init(SPI_HandleTypeDef* hspi, I2C_HandleTypeDef* hi2c,
                       GPIO_TypeDef* spi_cs_port, uint16_t spi_cs_pin,
                       GPIO_TypeDef* led_port, uint16_t led_pin)
 {
-  node_ = node;
   IMU::init();
   
   spi_cs_port_ = spi_cs_port;
