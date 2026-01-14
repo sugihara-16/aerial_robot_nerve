@@ -28,10 +28,9 @@ GPS::GPS(): GPS_Backend()
   class_ = 0;
 }
 
-void GPS::init(UART_HandleTypeDef *huart, rcl_node_t* node, rclc_executor_t* executor,
-               GPIO_TypeDef* led_port, uint16_t led_pin)
+void GPS::init(UART_HandleTypeDef *huart, GPIO_TypeDef* led_port, uint16_t led_pin)
 {
-  GPS_Backend::init(huart, node, executor);
+  GPS_Backend::init(huart);
 
   led_port_ = led_port;
   led_pin_ = led_pin;

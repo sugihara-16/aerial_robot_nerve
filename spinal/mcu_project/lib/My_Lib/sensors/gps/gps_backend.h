@@ -14,13 +14,7 @@
 #include "util/ring_buffer.h"
 #include "math/AP_Math.h"
 #include "config.h"
-#include <rcl/rcl.h>
-#include <rclc/rclc.h>
-#include <rclc/executor.h>
-#include <rosidl_runtime_c/message_type_support_struct.h>
-#include <std_msgs/msg/u_int8.h>
-#include <spinal_msgs/msg/gps.h>
-#include <spinal_msgs/msg/gps_full.h>
+
 #include <STM32Hardware.h>
 
 #define GPS_BUFFER_SIZE 512
@@ -103,7 +97,6 @@ public:
   uint32_t last_message_time_ms() const { return timing_.last_message_time_ms; }
   bool getMagValid() const { return state_.mag_valid; }
   float getMagDeclination() const { return state_.mag_dec; }
-  void gpsConfigCallback(const std_msgs__msg__UInt8& config_msg){}
 
   void write(const uint8_t data_byte)
   {
@@ -117,30 +110,32 @@ public:
     HAL_UART_Transmit(huart_, (uint8_t *)data_byte, size, 100); //timeout: 100[ms]
   }
 
+  using PublishFn = void (*)(void* ctx);
+
+  void set_publish_hook(PublishFn fn, void* ctx) {
+    publish_fn_ = fn;
+    publish_ctx_ = ctx;
+  }
+
 
 protected:
 
   UART_HandleTypeDef *huart_;
-  rcl_node_t* node_;
-  rclc_executor_t* executor_;
-  rcl_subscription_t gps_config_sub_;
-  std_msgs__msg__UInt8 gps_config_msg_;
-  rcl_publisher_t gps_pub_;
-  spinal_msgs__msg__Gps gps_msg_;
-  // rcl_publisher_t gps_full_pub_;
-  //spinal_msgs__msg__GpsFull gps_full_msg_;
 
   GPS_State state_; ///< public state for this instance
   GPS_timing timing_;
 
-  void init(UART_HandleTypeDef* huart, rcl_node_t* node, rclc_executor_t* executor);
+  void init(UART_HandleTypeDef* huart);
 
-  virtual void publish();
   virtual void processMessage() = 0;
 
   bool available();
   int read();
+  void publish();
 
+private:
+  PublishFn publish_fn_{nullptr};
+  void* publish_ctx_{nullptr};  
 };
 
 #endif //GPS_BACKEND_H__

@@ -69,8 +69,7 @@ class GPS : public GPS_Backend
 {
 public:
   GPS();
-  void init(UART_HandleTypeDef *huart, rcl_node_t* node, rclc_executor_t* executor,
-            GPIO_TypeDef* led_port, uint16_t led_pin);
+  void init(UART_HandleTypeDef *huart, GPIO_TypeDef* led_port, uint16_t led_pin);
   void update() override;
 
 private:
