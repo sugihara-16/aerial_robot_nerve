@@ -34,6 +34,9 @@
 #include <rclc/rclc.h>
 #include <rclc/executor.h>
 #include <rmw_microros/rmw_microros.h>
+#include <ros_utils/ros_module_base.hpp>
+#include <ros_utils/ros_module_manager.hpp>
+#include <ros_utils/ros_context.hpp>
 
 #include <std_msgs/msg/u_int32.h>
 #include <std_msgs/msg/u_int8.h>
@@ -48,6 +51,7 @@
 #include "sensors/imu/imu_ros_cmd.h"
 #include "sensors/baro/baro_ms5611.h"
 #include "sensors/gps/gps_ublox.h"
+#include "sensors/gps/gps_ros_module.h"
 /* #include "sensors/encoder/mag_encoder.h" */
 
 /* #include "battery_status/battery_status.h" */
@@ -118,17 +122,9 @@ osSemaphoreId uartTxSemHandle;
 /* USER CODE BEGIN PV */
 osMailQId canMsgMailHandle;
 
-/* ros::NodeHandle nh_; */
-static rcl_allocator_t allocator;
-static rclc_support_t support;
-static rcl_node_t node;
-static rclc_executor_t executor;
-
-static rcl_publisher_t pub_uptime;
-static std_msgs__msg__UInt32 msg_uptime;
-
-static rcl_subscription_t sub_led;
-static std_msgs__msg__UInt8 msg_led;
+/* micro ros */
+static RosContext ros_cxt_;
+static RosModuleManager<8> ros_mgr_;
 
 /* /\* sensor instances *\/ */
 #if IMU_MPU
@@ -138,7 +134,7 @@ ICM20948 imu_;
 #endif
 
 Baro baro_;
-GPS gps_;
+GpsRosModule gps_ros_mod_;
 /* BatteryStatus battery_status_; */
 
 /* /\* servo instance *\/ */
@@ -182,18 +178,30 @@ void coreTaskEvokeCb(void const * argument);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-static void led_callback(const void * msgin)
+
+static bool ensure_ros_mutex_created()
 {
-  const std_msgs__msg__UInt8 * m = (const std_msgs__msg__UInt8 *)msgin;
-  if (m->data) {
-    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_SET);
-  } else {
-    HAL_GPIO_WritePin(LED0_GPIO_Port, LED0_Pin, GPIO_PIN_RESET);
+  if (ros_cxt_.ros_mutex != nullptr) return true;
+
+#if (osCMSIS < 0x20000U)
+  osMutexDef(rosMutex);
+  ros_cxt_.ros_mutex = osMutexCreate(osMutex(rosMutex));
+#else
+  static const osMutexAttr_t attr = { .name = "rosMutex" };
+  ros_cxt_.ros_mutex = osMutexNew(&attr);
+#endif
+
+  if (ros_cxt_.ros_mutex == nullptr) {
+    Error_Handler();
   }
+  return true;
 }
 
 static void microros_init_all(void)
 {
+  // 0) Create muxte for ros
+  ensure_ros_mutex_created();
+    
   // 1) Register custom transport (must be done before rclc_support_init)
   microros_transport_init();
   
@@ -203,42 +211,42 @@ static void microros_init_all(void)
     }
 
   // 2) Init rcl/rclc
-  allocator = rcl_get_default_allocator();
-  rclc_support_init(&support, 0, NULL, &allocator);
+  ros_cxt_.allocator = rcl_get_default_allocator();
+  rclc_support_init(&ros_cxt_.support, 0, NULL, &ros_cxt_.allocator);
 
-  rclc_node_init_default(&node, "stm32_node", "", &support);
+  rclc_node_init_default(&ros_cxt_.node, "stm32_node", "", &ros_cxt_.support);
 
-  // 3) Publisher: /uptime_ms (std_msgs/UInt32)
-  rclc_publisher_init_default(
-      &pub_uptime,
-      &node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt32),
-      "uptime_ms");
+  ros_mgr_.set_ros_mutex_all(&ros_cxt_.ros_mutex);
+  ros_mgr_.set_ros_ready_all(&ros_cxt_.ready);
 
-  // 4) Subscription: /led (std_msgs/UInt8)
-  rclc_subscription_init_default(
-      &sub_led,
-      &node,
-      ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt8),
-      "led");
+  // 3) Create pub & sub of all ros modules
+  osMutexWait(ros_cxt_.ros_mutex, osWaitForever);
+  ros_mgr_.create_all(ros_cxt_.node);
 
-  // 5) Executor
-  rclc_executor_init(&executor, &support.context, 1, &allocator);
-  rclc_executor_add_subscription(
-      &executor,
-      &sub_led,
-      &msg_led,
-      &led_callback,
-      ON_NEW_DATA);
+  // 4) Count number of handles
+  const size_t N = ros_mgr_.total_executor_handles();
+  rclc_executor_init(&ros_cxt_.executor, &ros_cxt_.support.context, N, &ros_cxt_.allocator);
+
+  // 5) Register to executor
+  ros_mgr_.add_all(ros_cxt_.executor);
+
+  ros_cxt_.ready.store(true, std::memory_order_release);
+  osMutexRelease(ros_cxt_.ros_mutex);
 }
 
 static void microros_fini_all(void)
 {
-  (void)rclc_executor_fini(&executor);
-  (void)rcl_subscription_fini(&sub_led, &node);
-  (void)rcl_publisher_fini(&pub_uptime, &node);
-  (void)rcl_node_fini(&node);
-  (void)rclc_support_fini(&support);
+  osMutexWait(ros_cxt_.ros_mutex, osWaitForever);
+  ros_cxt_.ready.store(false, std::memory_order_release);
+
+  // executor -> module destroy -> node/support
+  (void)rclc_executor_fini(&ros_cxt_.executor);
+  ros_mgr_.destroy_all(ros_cxt_.node);
+
+  (void)rcl_node_fini(&ros_cxt_.node);
+  (void)rclc_support_fini(&ros_cxt_.support);
+
+  osMutexRelease(ros_cxt_.ros_mutex);
 }
 /* USER CODE END 0 */
 
@@ -293,53 +301,56 @@ int main(void)
   MX_USART2_UART_Init();
   /* USER CODE BEGIN 2 */
 
-/*   // workaround for the wired generation of STMCubeMX */
-/*   HAL_NVIC_DisableIRQ(DMA1_Stream0_IRQn); // we do not need DMA Interrupt for USART1 RX, circular mode */
-/*   HAL_NVIC_DisableIRQ(DMA1_Stream2_IRQn); // we do not need DMA Interrupt for USART3 RX, circular mode */
+  // workaround for the wired generation of STMCubeMX
+  HAL_NVIC_DisableIRQ(DMA1_Stream0_IRQn); // we do not need DMA Interrupt for USART1 RX, circular mode
+  HAL_NVIC_DisableIRQ(DMA1_Stream2_IRQn); // we do not need DMA Interrupt for USART3 RX, circular mode
 
-/*   /\* Flash Memory *\/ */
-/*   /\* FlashMemory::init(0x081E0000, FLASH_SECTOR_7); *\/ */
-/*   // Bank2, Sector7: 0x081E 0000 (128KB); https://www.stmcu.jp/download/?dlid=51599_jp */
-/*   // BANK1 (with Sector7) cuases the flash failure by STLink from the second time. So we use BANK_2, which is tested OK */
+  /* Flash Memory */
+  FlashMemory::init(0x081E0000, FLASH_SECTOR_7);
+  // Bank2, Sector7: 0x081E 0000 (128KB); https://www.stmcu.jp/download/?dlid=51599_jp
+  // BANK1 (with Sector7) cuases the flash failure by STLink from the second time. So we use BANK_2, which is tested OK
 
-/*   // It semms like the first 64 byte of flashmemory for data is easily to be overwritten by zero, when re-flash the flash memory. */
-/*   // A possible reason is the power supply from stlink does not contain 3.3V output. */
-/*   // which is the only difference compared with the old version (STM32F7) */
-/*   // So, we introduce following dummy data for a workaround to avoid the vanishment of stored data in flash memory. */
-/*   /\* uint8_t dummy_data[64]; *\/ */
-/*   /\* memset(dummy_data, 1, 64); *\/ */
-/*   /\* FlashMemory::addValue(dummy_data, 64); *\/ */
+  // It semms like the first 64 byte of flashmemory for data is easily to be overwritten by zero, when re-flash the flash memory.
+  // A possible reason is the power supply from stlink does not contain 3.3V output.
+  // which is the only difference compared with the old version (STM32F7)
+  // So, we introduce following dummy data for a workaround to avoid the vanishment of stored data in flash memory.
+  uint8_t dummy_data[64];
+  memset(dummy_data, 1, 64);
+  FlashMemory::addValue(dummy_data, 64);
 
-/* #if 0 // test flash memory */
+#if 0 // test flash memory
 
-/*   uint8_t test_data[128]; */
-/*   for(int i = 0; i < 128; i++) */
-/*     test_data[i] = i; */
-/*   FlashMemory::addValue(test_data, 128); */
+  uint8_t test_data[128];
+  for(int i = 0; i < 128; i++)
+    test_data[i] = i;
+  FlashMemory::addValue(test_data, 128);
 
-/*   int32_t test_int = -1234; */
-/*   //int32_t test_int; */
-/*   FlashMemory::addValue(&test_int, sizeof(test_int)); */
+  int32_t test_int = -1234;
+  //int32_t test_int;
+  FlashMemory::addValue(&test_int, sizeof(test_int));
 
-/*   float test_float = 1.1f; */
-/*   //float test_float; */
-/*   FlashMemory::addValue(&test_float, sizeof(test_float)); */
+  float test_float = 1.1f;
+  //float test_float;
+  FlashMemory::addValue(&test_float, sizeof(test_float));
 
-/*   /\* FlashMemory::erase(); *\/ */
-/*   /\* FlashMemory::write(); *\/ */
-/*   FlashMemory::read(); */
-/* #endif */
+  /* FlashMemory::erase(); */
+  /* FlashMemory::write(); */
+  FlashMemory::read();
+#endif
 
-  imu_.init(&hspi1, &hi2c3, &node, IMUCS_GPIO_Port, IMUCS_Pin, LED0_GPIO_Port, LED0_Pin);
-  IMU_ROS_CMD::init(&node, &executor);
-  IMU_ROS_CMD::addImu(&imu_);
-  baro_.init(&hi2c1, &node, &executor, BAROCS_GPIO_Port, BAROCS_Pin);
-  gps_.init(&huart3, &node, &executor, LED2_GPIO_Port, LED2_Pin);
+  ensure_ros_mutex_created();
+  
+  /* imu_.init(&hspi1, &hi2c3, IMUCS_GPIO_Port, IMUCS_Pin, LED0_GPIO_Port, LED0_Pin); */
+  /* IMU_ROS_CMD::init(&node, &executor); */
+  /* IMU_ROS_CMD::addImu(&imu_); */
+  /* baro_.init(&hi2c1, &node, &executor, BAROCS_GPIO_Port, BAROCS_Pin); */
+  gps_ros_mod_.init_hw(&huart3, LED2_GPIO_Port, LED2_Pin);
+  ros_mgr_.add(&gps_ros_mod_);
 
 /*   DShot* dshotptr = nullptr; */
 /* #if DSHOT */
 /*   battery_status_.init(&hadc1, &nh_, false); */
-estimator_.init(&imu_, &baro_, &gps_, &node, &executor);  // imu + baro + gps => att + alt + pos(xy)
+  /* estimator_.init(&imu_, &baro_, &gps_, &node, &executor);  // imu + baro + gps => att + alt + pos(xy) */
 /*   dshot_.init(DSHOT600, &htim1,TIM_CHANNEL_1, &htim1,TIM_CHANNEL_2, &htim1,TIM_CHANNEL_3, &htim1, TIM_CHANNEL_4); */
 /*   dshot_.initTelemetry(&huart6); */
 /*   dshotptr = &dshot_; */
@@ -348,7 +359,7 @@ estimator_.init(&imu_, &baro_, &gps_, &node, &executor);  // imu + baro + gps =>
 /*   estimator_.init(&imu_, &baro_, &gps_, &nh_);  // imu + baro + gps => att + alt + pos(xy) */
 /* #endif */
 
-/*   FlashMemory::read(); //IMU calib data (including IMU in neurons) */
+  FlashMemory::read(); //IMU calib data (including IMU in neurons)
 
 /*   bool servo_connect = servo_.init(&huart2, &nh_, NULL); */
 
@@ -395,9 +406,6 @@ estimator_.init(&imu_, &baro_, &gps_, &node, &executor);  // imu + baro + gps =>
   coreTaskTimerHandle = osTimerCreate(osTimer(coreTaskTimer), osTimerPeriodic, NULL);
 
   /* USER CODE BEGIN RTOS_TIMERS */
-  /* start timers, add new ones, ... */
-  osTimerStart(coreTaskTimerHandle, 1); // 1 ms (1kHz)
-
   /* USER CODE END RTOS_TIMERS */
 
   /* USER CODE BEGIN RTOS_QUEUES */
@@ -1263,6 +1271,8 @@ static void MX_GPIO_Init(void)
 void coreTaskFunc(void const * argument)
 {
   /* USER CODE BEGIN 5 */
+  /* start timers */
+  osTimerStart(coreTaskTimerHandle, 1); // 1 ms (1kHz)
 #ifdef USE_ETH
   /* init code for LWIP */
   MX_LWIP_Init();
@@ -1293,13 +1303,13 @@ void coreTaskFunc(void const * argument)
 
   for(;;)
     {
-      /* osSemaphoreWait(coreTaskSemHandle, osWaitForever); */
+      if(!ensure_ros_mutex_created()) return;
+      osSemaphoreWait(coreTaskSemHandle, osWaitForever);
 
       /* Spine::send(); */
-
       /* imu_.update(); */
       /* baro_.update(); */
-      /* gps_.update(); */
+      gps_ros_mod_.update();
       /* estimator_.update(); */
       /* controller_.update(); */
 
@@ -1335,8 +1345,7 @@ void rosSpinTaskFunc(void const * argument)
 {
   /* USER CODE BEGIN rosSpinTaskFunc */
   (void)argument;
-  
-  uint32_t last_pub = HAL_GetTick();
+
   uint32_t last_ping = HAL_GetTick();
 
   microros_init_all();
@@ -1351,20 +1360,17 @@ void rosSpinTaskFunc(void const * argument)
             {
               microros_fini_all();
               microros_init_all();
-              last_pub = HAL_GetTick();
-              last_ping = last_pub;
+              last_ping = HAL_GetTick();
               continue;
             }
           last_ping = now;
         }
 
-      rclc_executor_spin_some(&executor, RCL_MS_TO_NS(1));
-
-      if ((now - last_pub) >= 100) // 10Hz
+      if(ros_cxt_.ready.load())
         {
-          msg_uptime.data = now;
-          (void)rcl_publish(&pub_uptime, &msg_uptime, NULL);
-          last_pub = now;
+          osMutexWait(ros_cxt_.ros_mutex, osWaitForever);
+          rclc_executor_spin_some(&ros_cxt_.executor, RCL_MS_TO_NS(1));
+          osMutexRelease(ros_cxt_.ros_mutex);
         }
 
       osDelay(1);
@@ -1479,9 +1485,9 @@ __weak void ServoTaskCallback(void const * argument)
 void coreTaskEvokeCb(void const * argument)
 {
   /* USER CODE BEGIN coreTaskEvokeCb */
-  /* if(FlashMemory::isLock()) return; // avoid overflow of ros publish buffer in rosserial UART mode */
-  /* // timer callback to evoke coreTask at 1KHz */
-  /* osSemaphoreRelease (coreTaskSemHandle); */
+  if(FlashMemory::isLock()) return; // avoid overflow of ros publish buffer in rosserial UART mode
+  // timer callback to evoke coreTask at 1KHz
+  osSemaphoreRelease (coreTaskSemHandle);
   /* USER CODE END coreTaskEvokeCb */
 }
 
