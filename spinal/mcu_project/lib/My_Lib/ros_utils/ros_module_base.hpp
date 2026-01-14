@@ -283,7 +283,7 @@ public:
     timer_entries_.clear();
   }
 
-  virtual void update() = 0;
+  virtual void update(){};
 
 protected:
 
