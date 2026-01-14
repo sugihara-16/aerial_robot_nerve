@@ -52,7 +52,7 @@
 #include "sensors/baro/baro_ros_module.h"
 #include "sensors/gps/gps_ublox.h"
 #include "sensors/gps/gps_ros_module.h"
-/* #include "sensors/encoder/mag_encoder.h" */
+#include "sensors/encoder/mag_encoder_ros_module.h"
 
 /* #include "battery_status/battery_status.h" */
 /* #include "servo/servo.h" */

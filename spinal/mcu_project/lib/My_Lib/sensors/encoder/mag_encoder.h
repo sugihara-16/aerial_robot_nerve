@@ -13,35 +13,30 @@
 #define __MAG_ENCODER_H
 
 #include "config.h"
-#include <rcl/rcl.h>
-#include <rclc/rclc.h>
-#include <rosidl_runtime_c/message_type_support_struct.h>
-#include <std_msgs/msg/u_int16.h>
-
+#include <cstdint>
 
 class MagEncoder
 {
 public:
-  MagEncoder();
-  ~MagEncoder(){};
-  
-  static const uint8_t AS5600_I2C_ADDRESS =  0x6c; // 0x36 << 1; NOTE: STM: i2c_address << 1 !!!
-  static const uint8_t AS5600_REG_RAW_ANGLE =  0x0C;
-  static const uint8_t UPDATE_INTERVAL = 20; //20 -> 50Hz
+  MagEncoder() = default;
+  ~MagEncoder() = default;
 
-  void init(I2C_HandleTypeDef* hi2c, rcl_node_t* node);
-  void update(void);
+  static const uint8_t  AS5600_I2C_ADDRESS   = 0x6c; // 0x36<<1 (STM I2C addr shifted)
+  static const uint8_t  AS5600_REG_RAW_ANGLE = 0x0C;
+  static const uint32_t UPDATE_INTERVAL_MS   = 20;   // 50Hz
+
+  void init(I2C_HandleTypeDef* hi2c);
+  void update();
+
+  uint16_t raw_angle() const { return raw_encoder_value_; }
+  bool updated() const { return updated_; }
+  void clear_updated() { updated_ = false; }
 
 private:
-  I2C_HandleTypeDef* hi2c_;
-  rcl_node_t* node_;
-  rcl_publisher_t angle_pub_;
-
-  uint16_t raw_encoder_value_;
-  uint32_t last_time_;
-
-  std_msgs__msg__UInt16 angle_msg_;
-
+  I2C_HandleTypeDef* hi2c_{nullptr};
+  uint16_t raw_encoder_value_{0};
+  uint32_t last_time_{0};
+  bool updated_{false};
 };
 
 #endif
