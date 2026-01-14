@@ -48,7 +48,7 @@
 #include "flashmemory/flashmemory.h"
 #include "sensors/imu/drivers/mpu9250/imu_mpu9250.h"
 #include "sensors/imu/drivers/icm20948/icm_20948.h"
-#include "sensors/imu/imu_ros_cmd.h"
+#include "sensors/imu/imu_ros_module.h"
 #include "sensors/baro/baro_ms5611.h"
 #include "sensors/gps/gps_ublox.h"
 #include "sensors/gps/gps_ros_module.h"
@@ -127,6 +127,7 @@ static RosContext ros_cxt_;
 static RosModuleManager<8> ros_mgr_;
 
 /* /\* sensor instances *\/ */
+ImuRosModule imu_ros_mod_;
 #if IMU_MPU
 IMUOnboard imu_;
 #elif IMU_ICM
@@ -340,9 +341,9 @@ int main(void)
 
   ensure_ros_mutex_created();
   
-  /* imu_.init(&hspi1, &hi2c3, IMUCS_GPIO_Port, IMUCS_Pin, LED0_GPIO_Port, LED0_Pin); */
-  /* IMU_ROS_CMD::init(&node, &executor); */
-  /* IMU_ROS_CMD::addImu(&imu_); */
+  imu_.init(&hspi1, &hi2c3, IMUCS_GPIO_Port, IMUCS_Pin, LED0_GPIO_Port, LED0_Pin);
+  imu_ros_mod_.addImu(&imu_);
+  ros_mgr_.add(&imu_ros_mod_);
   /* baro_.init(&hi2c1, &node, &executor, BAROCS_GPIO_Port, BAROCS_Pin); */
   gps_ros_mod_.init_hw(&huart3, LED2_GPIO_Port, LED2_Pin);
   ros_mgr_.add(&gps_ros_mod_);
@@ -1297,7 +1298,7 @@ void coreTaskFunc(void const * argument)
   /* nh_.initNode(dst_addr, 12345,12345); */
 #endif
 
-  /* imu_.gyroCalib(true, IMU::GYRO_DEFAULT_CALIB_DURATION); // re-calibrate gyroscope because of the HAL_Delay in spine init */
+  imu_.gyroCalib(true, IMU::GYRO_DEFAULT_CALIB_DURATION); // re-calibrate gyroscope because of the HAL_Delay in spine init
 
   osSemaphoreWait(coreTaskSemHandle, osWaitForever);
 
@@ -1307,7 +1308,7 @@ void coreTaskFunc(void const * argument)
       osSemaphoreWait(coreTaskSemHandle, osWaitForever);
 
       /* Spine::send(); */
-      /* imu_.update(); */
+      imu_.update();
       /* baro_.update(); */
       gps_ros_mod_.update();
       /* estimator_.update(); */
