@@ -49,7 +49,7 @@
 #include "sensors/imu/drivers/mpu9250/imu_mpu9250.h"
 #include "sensors/imu/drivers/icm20948/icm_20948.h"
 #include "sensors/imu/imu_ros_module.h"
-#include "sensors/baro/baro_ms5611.h"
+#include "sensors/baro/baro_ros_module.h"
 #include "sensors/gps/gps_ublox.h"
 #include "sensors/gps/gps_ros_module.h"
 /* #include "sensors/encoder/mag_encoder.h" */
@@ -134,7 +134,7 @@ IMUOnboard imu_;
 ICM20948 imu_;
 #endif
 
-Baro baro_;
+BaroRosModule baro_ros_mod_;
 GpsRosModule gps_ros_mod_;
 /* BatteryStatus battery_status_; */
 
@@ -344,7 +344,10 @@ int main(void)
   imu_.init(&hspi1, &hi2c3, IMUCS_GPIO_Port, IMUCS_Pin, LED0_GPIO_Port, LED0_Pin);
   imu_ros_mod_.addImu(&imu_);
   ros_mgr_.add(&imu_ros_mod_);
-  /* baro_.init(&hi2c1, &node, &executor, BAROCS_GPIO_Port, BAROCS_Pin); */
+  
+  baro_ros_mod_.init_hw(&hi2c1, BAROCS_GPIO_Port, BAROCS_Pin);
+  ros_mgr_.add(&baro_ros_mod_);
+
   gps_ros_mod_.init_hw(&huart3, LED2_GPIO_Port, LED2_Pin);
   ros_mgr_.add(&gps_ros_mod_);
 
@@ -1309,7 +1312,7 @@ void coreTaskFunc(void const * argument)
 
       /* Spine::send(); */
       imu_.update();
-      /* baro_.update(); */
+      baro_ros_mod_.update();
       gps_ros_mod_.update();
       /* estimator_.update(); */
       /* controller_.update(); */

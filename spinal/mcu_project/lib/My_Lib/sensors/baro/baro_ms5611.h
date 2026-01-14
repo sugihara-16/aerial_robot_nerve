@@ -8,97 +8,65 @@
 #ifndef __cplusplus
 #error "Please define __cplusplus, because this is a c++ based file "
 #endif
-
 #ifndef __BARO_MS5611_H
 #define __BARO_MS5611_H
 
-
 #include "sensors/baro/baro.h"
-#include <rcl/rcl.h>
-#include <rclc/rclc.h>
-#include <rclc/executor.h>
-#include <rosidl_runtime_c/message_type_support_struct.h>
-#include <std_msgs/msg/u_int8.h>
+#include <stdint.h>
 
-// #define BARO_H      HAL_GPIO_WritePin(GPIOE,GPIO_PIN_1,GPIO_PIN_SET)
-// #define BARO_L      HAL_GPIO_WritePin(GPIOE,GPIO_PIN_1,GPIO_PIN_RESET)
-
-class Baro :public BaroBackend
+class Baro : public BaroBackend
 {
 public:
   Baro();
 
   void update(bool calibrate = false);
   void accumulate();
-  void init(I2C_HandleTypeDef* hi2c, rcl_node_t* node, rclc_executor_t* executor,
-            GPIO_TypeDef* baro_ctrl_port, uint16_t baro_ctrl_pin);
 
-  void baroConfigCallback(const std_msgs__msg__UInt8& config_msg);
+  void init_hw(I2C_HandleTypeDef* hi2c,
+               GPIO_TypeDef* baro_ctrl_port, uint16_t baro_ctrl_pin);
 
-  static const uint8_t MS561101BA_ADDRESS =  0xEC;  // 0x76<<1;
+  static const uint8_t MS561101BA_ADDRESS = 0xEC;
 
   static const uint8_t CMD_MS56XX_RESET = 0x1E;
   static const uint8_t CMD_MS56XX_READ_ADC = 0x00;
 
-  /* PROM start address */
   static const uint8_t CMD_MS56XX_PROM = 0xA0;
 
-  /* write to one of these addresses to start pressure conversion */
   static const uint8_t ADDR_CMD_CONVERT_D1_OSR256  = 0x40;
   static const uint8_t ADDR_CMD_CONVERT_D1_OSR512  = 0x42;
   static const uint8_t ADDR_CMD_CONVERT_D1_OSR1024 = 0x44;
   static const uint8_t ADDR_CMD_CONVERT_D1_OSR2048 = 0x46;
   static const uint8_t ADDR_CMD_CONVERT_D1_OSR4096 = 0x48;
 
-  /* write to one of these addresses to start temperature conversion */
   static const uint8_t ADDR_CMD_CONVERT_D2_OSR256  = 0x50;
   static const uint8_t ADDR_CMD_CONVERT_D2_OSR512  = 0x52;
   static const uint8_t ADDR_CMD_CONVERT_D2_OSR1024 = 0x54;
   static const uint8_t ADDR_CMD_CONVERT_D2_OSR2048 = 0x56;
   static const uint8_t ADDR_CMD_CONVERT_D2_OSR4096 = 0x58;
 
-  /*
-    use an OSR of 1024 to reduce the self-heating effect of the
-    sensor. Information from MS tells us that some individual sensors
-    are quite sensitive to this effect and that reducing the OSR can
-    make a big difference
-  */
-  static const uint8_t ADDR_CMD_CONVERT_PRESSURE = ADDR_CMD_CONVERT_D1_OSR4096; //ADDR_CMD_CONVERT_D1_OSR1024;
-  static const uint8_t ADDR_CMD_CONVERT_TEMPERATURE = ADDR_CMD_CONVERT_D2_OSR4096;//ADDR_CMD_CONVERT_D2_OSR1024;
-
-  /*
-
-    #define MS561101BA_PRESSURE    0x40
-    #define MS561101BA_TEMPERATURE 0x50
-    #define OSR 0x08
-  */
+  static const uint8_t ADDR_CMD_CONVERT_PRESSURE     = ADDR_CMD_CONVERT_D1_OSR4096;
+  static const uint8_t ADDR_CMD_CONVERT_TEMPERATURE  = ADDR_CMD_CONVERT_D2_OSR4096;
 
 private:
-  rcl_node_t* node_;
-  rclc_executor_t* executor_;
-  rcl_subscription_t baro_config_sub_;
-  std_msgs__msg__UInt8 baro_config_msg_;
-
   void calculate();
   bool readCalib(uint16_t prom[8]);
 
   uint16_t readCalibWord(uint8_t word);
   uint32_t readAdc();
 
-  GPIO_TypeDef* baro_ctrl_port_;
-  uint16_t baro_ctrl_pin_;
+  GPIO_TypeDef* baro_ctrl_port_{nullptr};
+  uint16_t baro_ctrl_pin_{0};
 
-  uint32_t test_value;
+  uint32_t test_value{0};
 
-  /* Asynchronous state: */
-  volatile bool            tp_updated_; //Temperature and Pressure are updated
-  volatile uint8_t         d1_count_;
-  volatile uint8_t         d2_count_;
-  volatile uint32_t        s_d1_, s_d2_;
-  uint8_t                  state_;
+  volatile bool     tp_updated_{false};
+  volatile uint8_t  d1_count_{0};
+  volatile uint8_t  d2_count_{0};
+  volatile uint32_t s_d1_{0}, s_d2_{0};
+  uint8_t           state_{0};
 
-  // Internal calibration registers
-  uint16_t                 c1_, c2_ , c3_, c4_, c5_, c6_;
-  float                    d1_, d2_;
+  uint16_t c1_{0}, c2_{0}, c3_{0}, c4_{0}, c5_{0}, c6_{0};
+  float    d1_{0.0f}, d2_{0.0f};
 };
+
 #endif

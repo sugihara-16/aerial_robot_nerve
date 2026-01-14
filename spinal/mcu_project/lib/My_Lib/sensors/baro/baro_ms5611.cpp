@@ -9,17 +9,7 @@
 #error "Please define __cplusplus, because this is a c++ based file "
 #endif
 
-
 #include "sensors/baro/baro_ms5611.h"
-
-static Baro* baro_instance_ = nullptr;
-
-static void baroConfigCallbackStatic(const void * msgin)
-{
-  if (baro_instance_ == nullptr) return;
-  if (msgin == nullptr) return;
-  baro_instance_->baroConfigCallback(*reinterpret_cast<const std_msgs__msg__UInt8*>(msgin));
-}
 
 Baro::Baro(): BaroBackend()
 {
@@ -27,42 +17,27 @@ Baro::Baro(): BaroBackend()
   tp_updated_ = false;
 }
 
-void Baro::init(I2C_HandleTypeDef* hi2c, rcl_node_t* node, rclc_executor_t* executor,
-                GPIO_TypeDef* baro_ctrl_port, uint16_t baro_ctrl_pin)
+void Baro::init_hw(I2C_HandleTypeDef* hi2c,
+                   GPIO_TypeDef* baro_ctrl_port, uint16_t baro_ctrl_pin)
 {
   i2c_handle_ = hi2c;
-  node_ = node;
-  executor_ = executor;
-  baro_instance_ = this;
-
-  rclc_subscription_init_default(
-    &baro_config_sub_,
-    node_,
-    ROSIDL_GET_MSG_TYPE_SUPPORT(std_msgs, msg, UInt8),
-    "baro_config_cmd");
-
-  rclc_executor_add_subscription(
-    executor_,
-    &baro_config_sub_,
-    &baro_config_msg_,
-    &baroConfigCallbackStatic,
-    ON_NEW_DATA);
 
   baro_ctrl_port_ = baro_ctrl_port;
   baro_ctrl_pin_ = baro_ctrl_pin;
 
   GPIO_H(baro_ctrl_port_, baro_ctrl_pin_);
-  //reset
+
+  // reset
   uint8_t reg[1];
   reg[0] = CMD_MS56XX_RESET;
   HAL_I2C_Master_Transmit(i2c_handle_, MS561101BA_ADDRESS, reg, 1, 100);
 
   HAL_Delay(10);
+
   uint16_t prom[8];
   if (!readCalib(prom)) return;
   calibrated_ = true;
 
-  // Save factory calibration coefficients
   c1_ = prom[1];
   c2_ = prom[2];
   c3_ = prom[3];
@@ -70,10 +45,10 @@ void Baro::init(I2C_HandleTypeDef* hi2c, rcl_node_t* node, rclc_executor_t* exec
   c5_ = prom[5];
   c6_ = prom[6];
 
-  // Send a command to read temperature first
+  // first command
   reg[0] = ADDR_CMD_CONVERT_TEMPERATURE;
-  //reg[0] = ADDR_CMD_CONVERT_PRESSURE;
   HAL_I2C_Master_Transmit(i2c_handle_, MS561101BA_ADDRESS, reg, 1, 100);
+
   last_timer_ = HAL_GetTick();
   state_ = 0;
 
@@ -81,7 +56,6 @@ void Baro::init(I2C_HandleTypeDef* hi2c, rcl_node_t* node, rclc_executor_t* exec
   s_d2_ = 0;
   d1_count_ = 0;
   d2_count_ = 0;
-
 }
 
 /**
@@ -312,11 +286,4 @@ void Baro::calculate()
 
   pressure_ = (d1_*SENS/2097152 - OFF)/32768;
   temperature_ = (TEMP + 2000) * 0.01f;
-}
-
-void Baro::baroConfigCallback(const std_msgs__msg__UInt8& config_msg)
-{
-  //TODO
-  //temp
-  if(config_msg.data == 1) {}
 }
