@@ -57,7 +57,7 @@
 /* #include "battery_status/battery_status.h" */
 /* #include "servo/servo.h" */
 
-#include "state_estimate/state_estimate.h"
+#include "state_estimate/state_estimate_ros_module.h"
 /* #include "flight_control/flight_control.h" */
 
 /* #include <Spine/spine.h> */
@@ -143,7 +143,7 @@ GpsRosModule gps_ros_mod_;
 /* DShot dshot_; */
 
 
-StateEstimate estimator_;
+StateEstimateRosModule estimator_ros_mod_;
 /* FlightControl controller_; */
 
 /* USER CODE END PV */
@@ -350,6 +350,9 @@ int main(void)
 
   gps_ros_mod_.init_hw(&huart3, LED2_GPIO_Port, LED2_Pin);
   ros_mgr_.add(&gps_ros_mod_);
+
+  estimator_ros_mod_.init_hw(&imu_, baro_ros_mod_.getBaroHw(), gps_ros_mod_.getGpsHw());  // imu + baro + gps => att + alt + pos(xy)
+  ros_mgr_.add(&estimator_ros_mod_);
 
 /*   DShot* dshotptr = nullptr; */
 /* #if DSHOT */
@@ -1314,7 +1317,7 @@ void coreTaskFunc(void const * argument)
       imu_.update();
       baro_ros_mod_.update();
       gps_ros_mod_.update();
-      /* estimator_.update(); */
+      estimator_ros_mod_.update();
       /* controller_.update(); */
 
       /* Spine::update(); */
@@ -1360,7 +1363,11 @@ void rosSpinTaskFunc(void const * argument)
 
       if ((now - last_ping) >= 500)
         {
-          if (rmw_uros_ping_agent(100, 1) != RMW_RET_OK)
+          osMutexWait(ros_cxt_.ros_mutex, osWaitForever);
+          rmw_ret_t ping_ret = rmw_uros_ping_agent(500, 2);
+          osMutexRelease(ros_cxt_.ros_mutex);
+
+          if (ping_ret != RMW_RET_OK)
             {
               microros_fini_all();
               microros_init_all();
