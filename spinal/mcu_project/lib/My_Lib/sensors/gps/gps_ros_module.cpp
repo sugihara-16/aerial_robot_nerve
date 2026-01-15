@@ -57,16 +57,21 @@ void GpsRosModule::publish_from_gps_state()
 
   const auto& st = gps_.getGpsState();
 
-  uint64_t t_ms = rmw_uros_epoch_millis();
-  gps_msg_.stamp.sec = (int32_t)(t_ms / 1000ULL);
+  const uint64_t t_ms = rmw_uros_epoch_millis();
+
+  lock_ros_();
+ 
+  if (!ros_ready_->load(std::memory_order_acquire)) { unlock_ros_(); return; }
+
+  gps_msg_.stamp.sec     = (int32_t)(t_ms / 1000ULL);
   gps_msg_.stamp.nanosec = (uint32_t)((t_ms % 1000ULL) * 1000000ULL);
 
   gps_msg_.location[0] = st.location.lat / 1e7L;
   gps_msg_.location[1] = st.location.lng / 1e7L;
   gps_msg_.velocity[0] = st.velocity.x;
   gps_msg_.velocity[1] = st.velocity.y;
-  gps_msg_.sat_num = st.num_sats;
-  lock_ros_();
+  gps_msg_.sat_num      = st.num_sats;
+
   (void)rcl_publish(&gps_pub_, &gps_msg_, nullptr);
   unlock_ros_();
 }

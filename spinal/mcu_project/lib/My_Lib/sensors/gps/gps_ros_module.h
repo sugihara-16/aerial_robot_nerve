@@ -25,6 +25,8 @@ public:
 
   void publish_from_gps_state();
 
+  GPS* getGpsHw() {return &gps_;}
+
 private:
 
   GPS gps_;

@@ -18,6 +18,7 @@ public:
 
   void create_entities(rcl_node_t& node) override;
   void update() override { baro_.update(); }
+  Baro* getBaroHw() {return &baro_;}
 
 private:
   Baro baro_;
