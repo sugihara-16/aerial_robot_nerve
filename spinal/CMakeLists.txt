@@ -66,6 +66,11 @@ install(FILES
   DESTINATION share/${PROJECT_NAME}
 )
 
+install(
+  DIRECTORY launch
+  DESTINATION share/${PROJECT_NAME}
+)
+
 install(DIRECTORY
   resource/
   DESTINATION share/${PROJECT_NAME}/resource
