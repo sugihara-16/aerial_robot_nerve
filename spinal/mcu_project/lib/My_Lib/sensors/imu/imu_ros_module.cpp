@@ -2,6 +2,9 @@
 
 ImuRosModule* ImuRosModule::instance_ = nullptr;
 
+static constexpr size_t MAX_REQ_FLOATS = 16;
+float req_data_buf_[MAX_REQ_FLOATS];
+
 void ImuRosModule::addImu(IMU* imu)
 {
   if (!imu) return;
@@ -59,12 +62,19 @@ void ImuRosModule::imuCalibCallbackStatic_(const void* req_msg, void* res_msg)
   const auto* req = reinterpret_cast<const spinal_msgs__srv__ImuCalib_Request*>(req_msg);
 
   switch (req->command)
-  {
-    case spinal_msgs__srv__ImuCalib_Request__GET_CALIB_DATA:
     {
-      instance_->res_.success = true;
-      instance_->getImuCalibData_();
-      break;
+    case spinal_msgs__srv__ImuCalib_Request__GET_CALIB_DATA:
+      {
+        const uint16_t needed = instance_->imu_.size() * CALIB_DATA_SIZE;
+        if (needed > MAX_CALIB_FLOATS) {
+          instance_->res_.success = false;
+          instance_->res_.data.size = 0;
+          break;
+        }
+        instance_->res_.data.size = needed;
+        instance_->res_.success = true;
+        instance_->getImuCalibData_();
+        break;
     }
 
     case spinal_msgs__srv__ImuCalib_Request__RESET_CALIB_DATA:
@@ -72,6 +82,15 @@ void ImuRosModule::imuCalibCallbackStatic_(const void* req_msg, void* res_msg)
       for (unsigned int i = 0; i < instance_->imu_.size(); i++)
         instance_->imu_.at(i)->resetCalib();
 
+      
+      const uint16_t needed = instance_->imu_.size() * CALIB_DATA_SIZE;
+      if (needed > MAX_CALIB_FLOATS) {
+        instance_->res_.success = false;
+        instance_->res_.data.size = 0;
+        break;
+      }
+
+      instance_->res_.data.size = needed; 
       instance_->getImuCalibData_();
       instance_->res_.success = true;
       break;
@@ -176,4 +195,12 @@ void ImuRosModule::create_entities(rcl_node_t& node)
       &req_,
       &res_,
       &ImuRosModule::imuCalibCallbackStatic_);
+
+  req_.data.data = req_data_buf_;
+  req_.data.size = 0;
+  req_.data.capacity = MAX_REQ_FLOATS;
+
+  res_.data.data = calib_data_buf_;
+  res_.data.size = 0;
+  res_.data.capacity = MAX_CALIB_FLOATS;  
 }

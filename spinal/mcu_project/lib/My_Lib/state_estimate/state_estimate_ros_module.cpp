@@ -2,6 +2,9 @@
 
 #include "state_estimate/state_estimate_ros_module.h"
 
+#include <rcl/error_handling.h>
+#include <string.h>
+
 StateEstimateRosModule* StateEstimateRosModule::instance_ = nullptr;
 
 void StateEstimateRosModule::create_entities(rcl_node_t& node)
@@ -26,7 +29,7 @@ void StateEstimateRosModule::create_entities(rcl_node_t& node)
     &mag_declination_req_,
     &mag_declination_res_,
     &magDeclinationCallbackStatic);
-
+  
   instance_ = this;
   last_imu_pub_time_ms_ = HAL_GetTick();
 }
