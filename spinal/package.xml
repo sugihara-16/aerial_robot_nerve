@@ -9,12 +9,25 @@
   <license>BSD</license>
 
   <buildtool_depend>ament_cmake</buildtool_depend>
+  <buildtool_depend>ament_cmake_python</buildtool_depend>
 
   <depend>rclcpp</depend>
   <depend>rclcpp_lifecycle</depend>
   <depend>spinal_msgs</depend>
 
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>rqt_gui</exec_depend>
+  <exec_depend>rqt_gui_py</exec_depend>
+  <exec_depend>rqt_py_common</exec_depend>
+  <exec_depend>python_qt_binding</exec_depend>
+  <exec_depend>ament_index_python</exec_depend>
+  <exec_depend>tf_transformations</exec_depend>
+
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-matplotlib</exec_depend>
+
   <export>
     <build_type>ament_cmake</build_type>
+    <rqt_gui plugin="${prefix}/plugin.xml"/>
   </export>
 </package>

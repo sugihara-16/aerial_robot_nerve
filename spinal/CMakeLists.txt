@@ -6,6 +6,9 @@ if(CMAKE_COMPILER_IS_GNUCXX OR CMAKE_CXX_COMPILER_ID MATCHES "Clang")
 endif()
 
 find_package(ament_cmake REQUIRED)
+# ADDED
+find_package(ament_cmake_python REQUIRED)
+
 find_package(rclcpp REQUIRED)
 find_package(rclcpp_lifecycle REQUIRED)
 find_package(spinal_msgs REQUIRED)
@@ -54,6 +57,18 @@ install(
   DIRECTORY ${SPINAL_DIRS}/
   DESTINATION include/My_Lib
   FILES_MATCHING PATTERN "*.h"
+)
+
+ament_python_install_package(${PROJECT_NAME} PACKAGE_DIR src/${PROJECT_NAME})
+
+install(FILES
+  plugin.xml
+  DESTINATION share/${PROJECT_NAME}
+)
+
+install(DIRECTORY
+  resource/
+  DESTINATION share/${PROJECT_NAME}/resource
 )
 
 ament_export_targets(export_${PROJECT_NAME} HAS_LIBRARY_TARGET)

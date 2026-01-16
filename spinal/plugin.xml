@@ -1,0 +1,18 @@
+<?xml version="1.0"?>
+<library path="src">
+  <class
+      name="ImuCalibrator"
+      type="spinal.imu_calibration.ImuCalibrator"
+      base_class_type="rqt_gui_py::Plugin">
+    <description>IMU calibration GUI plugin (ROS 2)</description>
+    <qtgui>
+      <group>
+        <icon type="theme">folder</icon>
+        <label>aerial robot</label>
+      </group>
+      <label>IMU Calibration</label>
+      <icon type="theme">utilities-system-monitor</icon>
+      <statustip>A plugin for IMU calibration</statustip>
+    </qtgui>
+  </class>
+</library>
