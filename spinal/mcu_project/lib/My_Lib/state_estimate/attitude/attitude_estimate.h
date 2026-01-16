@@ -112,9 +112,9 @@ class AttitudeEstimate {
   }
 
   // --------- Outputs (used by StateEstimate for publishing / services) ----------
-  const ap::Vector3f& getMagVec() const { return estimator_->getMag(); }
-  const ap::Vector3f& getAccVec() const { return estimator_->getAcc(); }
-  const ap::Vector3f& getGyroVec() const { return estimator_->getAngular(); }
+  ap::Vector3f getMagVec() const { return estimator_->getMag(); }
+  ap::Vector3f getAccVec() const { return estimator_->getAcc(); }
+  ap::Vector3f getGyroVec() const { return estimator_->getAngular(); }
   ap::Quaternion getQuaternion() const { return estimator_->getQuaternion(); }
 
 #ifndef SIMULATION
