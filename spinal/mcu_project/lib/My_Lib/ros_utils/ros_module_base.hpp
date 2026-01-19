@@ -285,6 +285,8 @@ public:
 
   virtual void update(){};
 
+  virtual void publish(){};
+
 protected:
 
   bool ros_entities_ready_{false};
