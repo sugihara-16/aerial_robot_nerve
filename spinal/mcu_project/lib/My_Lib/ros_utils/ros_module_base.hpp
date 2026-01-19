@@ -105,7 +105,7 @@ public:
     if (pub_entries_.size() >= MAX_PUB_NUM) return false;
     if (type_support == nullptr || topic_name == nullptr) return false;
 
-    rcl_ret_t rc = rclc_publisher_init_default(
+    rcl_ret_t rc = rclc_publisher_init_best_effort(
       &pub,
       &node,
       type_support,
