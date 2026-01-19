@@ -6,7 +6,7 @@
 #include <string.h>
 
 StateEstimateRosModule* StateEstimateRosModule::instance_ = nullptr;
-
+uint32_t now_ms_test;
 void StateEstimateRosModule::create_entities(rcl_node_t& node)
 {
   reserve_entities();
@@ -37,53 +37,6 @@ void StateEstimateRosModule::create_entities(rcl_node_t& node)
 void StateEstimateRosModule::update()
 {
   estimator_.update();
-
-  // publish
-  publishImuIfNeeded_();
-}
-
-void StateEstimateRosModule::publishImuIfNeeded_()
-{
-  if (ros_ready_ == nullptr) return;
-  if (!ros_ready_->load(std::memory_order_acquire)) return;
-
-  AttitudeEstimate* att = estimator_.getAttEstimator();
-  if (!att) return;
-
-  if (!att->consumeUpdated()) return;
-
-  const uint32_t now_ms = HAL_GetTick();
-  if (now_ms - last_imu_pub_time_ms_ < IMU_PUB_INTERVAL_MS) return;
-  last_imu_pub_time_ms_ = now_ms;
-
-  const uint64_t t_ms = rmw_uros_epoch_millis();
-
-  const ap::Vector3f mag  = att->getMagVec();
-  const ap::Vector3f acc  = att->getAccVec();
-  const ap::Vector3f gyro = att->getGyroVec();
-  const ap::Quaternion q  = att->getQuaternion();
-
-  lock_ros_();
-
-  if (!ros_ready_->load(std::memory_order_acquire)) { unlock_ros_(); return; }
-
-  // stamp
-  imu_msg_.stamp.sec     = (int32_t)(t_ms / 1000ULL);
-  imu_msg_.stamp.nanosec = (uint32_t)((t_ms % 1000ULL) * 1000000ULL);
-
-  // values
-  imu_msg_.mag[0]  = mag.x;  imu_msg_.mag[1]  = mag.y;  imu_msg_.mag[2]  = mag.z;
-  imu_msg_.acc[0]  = acc.x;  imu_msg_.acc[1]  = acc.y;  imu_msg_.acc[2]  = acc.z;
-  imu_msg_.gyro[0] = gyro.x; imu_msg_.gyro[1] = gyro.y; imu_msg_.gyro[2] = gyro.z;
-
-  imu_msg_.quaternion[0] = q[1];
-  imu_msg_.quaternion[1] = q[2];
-  imu_msg_.quaternion[2] = q[3];
-  imu_msg_.quaternion[3] = q[0];
-
-  (void)rcl_publish(&imu_pub_, &imu_msg_, nullptr);
-
-  unlock_ros_();
 }
 
 void StateEstimateRosModule::magDeclinationCallbackStatic(const void * req_msg, void * res_msg)
@@ -120,6 +73,53 @@ void StateEstimateRosModule::magDeclinationCallback(
     default:
       break;
   }
+}
+
+
+void StateEstimateRosModule::publish()
+{
+  if (ros_ready_ == nullptr) return;
+  if (!ros_ready_->load(std::memory_order_acquire)) return;
+
+  now_ms_test = HAL_GetTick();
+
+  AttitudeEstimate* att = estimator_.getAttEstimator();
+  if (!att) return;
+
+  if (!att->consumeUpdated()) return;
+
+  const uint32_t now_ms = HAL_GetTick();
+  if (now_ms - last_imu_pub_time_ms_ < IMU_PUB_INTERVAL_MS) return;
+  last_imu_pub_time_ms_ = now_ms;
+
+  const uint64_t t_ms = rmw_uros_epoch_millis();
+
+  const ap::Vector3f mag  = att->getMagVec();
+  const ap::Vector3f acc  = att->getAccVec();
+  const ap::Vector3f gyro = att->getGyroVec();
+  const ap::Quaternion q  = att->getQuaternion();
+
+  // lock_ros_();
+
+  if (!ros_ready_->load(std::memory_order_acquire)) { unlock_ros_(); return; }
+
+  // stamp
+  imu_msg_.stamp.sec     = (int32_t)(t_ms / 1000ULL);
+  imu_msg_.stamp.nanosec = (uint32_t)((t_ms % 1000ULL) * 1000000ULL);
+
+  // values
+  imu_msg_.mag[0]  = mag.x;  imu_msg_.mag[1]  = mag.y;  imu_msg_.mag[2]  = mag.z;
+  imu_msg_.acc[0]  = acc.x;  imu_msg_.acc[1]  = acc.y;  imu_msg_.acc[2]  = acc.z;
+  imu_msg_.gyro[0] = gyro.x; imu_msg_.gyro[1] = gyro.y; imu_msg_.gyro[2] = gyro.z;
+
+  imu_msg_.quaternion[0] = q[1];
+  imu_msg_.quaternion[1] = q[2];
+  imu_msg_.quaternion[2] = q[3];
+  imu_msg_.quaternion[3] = q[0];
+
+  (void)rcl_publish(&imu_pub_, &imu_msg_, nullptr);
+
+  // unlock_ros_();  
 }
 
 #endif  // !SIMULATION
