@@ -1381,6 +1381,8 @@ void rosSpinTaskFunc(void const * argument)
         {
           osMutexWait(ros_cxt_.ros_mutex, osWaitForever);
           rclc_executor_spin_some(&ros_cxt_.executor, RCL_MS_TO_NS(1));
+          gps_ros_mod_.publish();
+          estimator_ros_mod_.publish();
           osMutexRelease(ros_cxt_.ros_mutex);
         }
 
