@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <functional>
+#include <string>
 
 void FlightControlRosModule::init(
   const std::shared_ptr<rclcpp_lifecycle::LifecycleNode>& node,
@@ -98,9 +99,18 @@ void FlightControlRosModule::publish()
     const float* angles = att.getTargetGimbalAngles();
     sensor_msgs::msg::JointState msg;
     msg.header.stamp = node_->now();
-    msg.position.resize(gimbal_count);
+    msg.name.reserve(gimbal_count);
+    msg.position.reserve(gimbal_count);
+    const uint8_t gimbal_dof = att.getGimbalDof();
     for (size_t i = 0; i < gimbal_count; ++i) {
-      msg.position[i] = static_cast<double>(angles[i]);
+      const size_t rotor_index = gimbal_dof > 0 ? i / gimbal_dof : i;
+      const size_t axis_index = gimbal_dof > 0 ? i % gimbal_dof : 0;
+      std::string joint_name = "gimbal" + std::to_string(rotor_index + 1);
+      if (gimbal_dof == 2) {
+        joint_name += axis_index == 0 ? "_roll" : "_pitch";
+      }
+      msg.name.push_back(joint_name);
+      msg.position.push_back(static_cast<double>(angles[i]));
     }
     gimbal_control_pub_->publish(msg);
   }
