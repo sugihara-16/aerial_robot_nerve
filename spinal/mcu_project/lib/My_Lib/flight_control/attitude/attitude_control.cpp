@@ -4,6 +4,7 @@
 
 #ifdef SIMULATION
 #include <chrono>
+#include <cstdio>
 #endif
 
 namespace
@@ -96,6 +97,10 @@ bool AttitudeController::update()
   if (failsafe_ && !force_landing_flag_ &&
       static_cast<int32_t>(now - flight_command_last_stamp_) >
       static_cast<int32_t>(FlightControlConstants::FLIGHT_COMMAND_TIMEOUT_MS)) {
+#ifdef SIMULATION
+    std::fprintf(stderr, "[flight_control] force landing: command timeout (%d ms)\n",
+                 static_cast<int32_t>(now - flight_command_last_stamp_));
+#endif
     setForceLandingFlag(true);
   }
 
@@ -109,6 +114,11 @@ bool AttitudeController::update()
   if (!force_landing_flag_ &&
       (fabsf(angles[FlightControlAxis::X]) > FlightControlConstants::MAX_TILT_ANGLE ||
        fabsf(angles[FlightControlAxis::Y]) > FlightControlConstants::MAX_TILT_ANGLE)) {
+#ifdef SIMULATION
+    std::fprintf(stderr, "[flight_control] force landing: attitude tilt roll=%f pitch=%f limit=%f\n",
+                 angles[FlightControlAxis::X], angles[FlightControlAxis::Y],
+                 FlightControlConstants::MAX_TILT_ANGLE);
+#endif
     setForceLandingFlag(true);
     error_angle_i_[FlightControlAxis::X] = 0.0f;
     error_angle_i_[FlightControlAxis::Y] = 0.0f;
@@ -200,6 +210,12 @@ bool AttitudeController::applyFourAxisCommand(const FlightControlFourAxisCommand
 
   if (fabsf(cmd.angles[0]) > FlightControlConstants::MAX_TILT_ANGLE ||
       fabsf(cmd.angles[1]) > FlightControlConstants::MAX_TILT_ANGLE) {
+#ifdef SIMULATION
+    if (!force_landing_flag_) {
+      std::fprintf(stderr, "[flight_control] force landing: command angle roll=%f pitch=%f limit=%f\n",
+                   cmd.angles[0], cmd.angles[1], FlightControlConstants::MAX_TILT_ANGLE);
+    }
+#endif
     setForceLandingFlag(true);
   }
 
