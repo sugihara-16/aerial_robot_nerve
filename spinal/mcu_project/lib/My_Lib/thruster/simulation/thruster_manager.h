@@ -68,6 +68,7 @@ private:
   float sim_voltage_{0.0f};
 
   float convertThrustToDuty_(float target_thrust) const;
+  float currentMaxThrust_() const;
   void updateVoltageFactor_();
   float currentVoltage_() const;
   void clearTargets_();

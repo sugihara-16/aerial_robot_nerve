@@ -2,6 +2,7 @@
 
 #include "thruster/simulation/thruster_manager.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cmath>
 
@@ -116,9 +117,13 @@ bool ThrusterManager::outputThrust(const float* target_thrust, size_t motor_coun
   if (!configured()) return false;
 
   updateVoltageFactor_();
+  const float max_thrust = currentMaxThrust_();
 
   for (size_t i = 0; i < n; ++i) {
-    target_thrust_[i] = start_control ? target_thrust[i] : 0.0f;
+    target_thrust_[i] = start_control ? std::max(0.0f, target_thrust[i]) : 0.0f;
+    if (max_thrust > 0.0f) {
+      target_thrust_[i] = std::min(target_thrust_[i], max_thrust);
+    }
     target_pwm_[i] = start_control ? convertThrustToDuty_(target_thrust_[i]) : ThrusterConstants::IDLE_DUTY;
 
     if (target_pwm_[i] < min_duty_) {
@@ -187,9 +192,7 @@ ThrusterControlLimits ThrusterManager::getControlLimits()
   if (!limits.configured || motor_info_count_ == 0) return limits;
 
   updateVoltageFactor_();
-  if (v_factor_ > 0.0f) {
-    limits.max_thrust = motor_info_[motor_ref_index_].max_thrust / v_factor_;
-  }
+  limits.max_thrust = currentMaxThrust_();
 
   return limits;
 }
@@ -246,6 +249,12 @@ float ThrusterManager::convertThrustToDuty_(float target_thrust) const
   }
 
   return target_pwm / 100.0f;
+}
+
+float ThrusterManager::currentMaxThrust_() const
+{
+  if (motor_info_count_ == 0 || v_factor_ <= 0.0f) return 0.0f;
+  return motor_info_[motor_ref_index_].max_thrust / v_factor_;
 }
 
 void ThrusterManager::updateVoltageFactor_()
