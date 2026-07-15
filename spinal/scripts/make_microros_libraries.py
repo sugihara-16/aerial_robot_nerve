@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import argparse
+import json
 import shutil
 import subprocess
 import re
@@ -15,6 +16,9 @@ DEFAULT_MICROROS_EXTRA_DIR = (
 )
 
 DEFAULT_STAGE_SUBDIR = "microros"
+DEFAULT_RMW_MAX_PUBLISHERS = 12
+DEFAULT_RMW_MAX_SUBSCRIPTIONS = 20
+DEFAULT_RMW_MAX_SERVICES = 6
 
 
 def run(cmd: list[str], cwd: Optional[Path] = None) -> None:
@@ -67,6 +71,48 @@ def update_extra_repos(repos_yaml: Path, pkg_name: str) -> None:
 
     repos_yaml.write_text(text.rstrip() + entry, encoding="utf-8")
     print(f"[info] updated: {repos_yaml}")
+
+
+def update_rmw_entity_limits(
+    colcon_meta: Path,
+    max_publishers: int,
+    max_subscriptions: int,
+    max_services: int,
+) -> None:
+    if not colcon_meta.is_file():
+        raise SystemExit(f"[error] colcon.meta not found: {colcon_meta}")
+
+    data = json.loads(colcon_meta.read_text(encoding="utf-8"))
+    try:
+        cmake_args = data["names"]["rmw_microxrcedds"]["cmake-args"]
+    except (KeyError, TypeError):
+        raise SystemExit(f"[error] rmw_microxrcedds cmake-args not found in: {colcon_meta}")
+
+    limits = {
+        "RMW_UXRCE_MAX_PUBLISHERS": max_publishers,
+        "RMW_UXRCE_MAX_SUBSCRIPTIONS": max_subscriptions,
+        "RMW_UXRCE_MAX_SERVICES": max_services,
+    }
+
+    for name, limit in limits.items():
+        if limit < 1:
+            raise SystemExit(f"[error] {name} must be at least 1")
+
+        prefix = f"-D{name}="
+        replacement = f"{prefix}{limit}"
+        for index, value in enumerate(cmake_args):
+            if value.startswith(prefix):
+                cmake_args[index] = replacement
+                break
+        else:
+            cmake_args.append(replacement)
+
+    colcon_meta.write_text(json.dumps(data, indent=4) + "\n", encoding="utf-8")
+    print(
+        f"[info] updated RMW entity limits in {colcon_meta}: "
+        f"publishers={max_publishers}, subscriptions={max_subscriptions}, "
+        f"services={max_services}"
+    )
 
 
 def locate_artifacts(microros_root: Path) -> tuple[Path, Path]:
@@ -226,6 +272,24 @@ def main() -> None:
         help="Destination subdir under STM32 project.",
     )
     ap.add_argument(
+        "--max-publishers",
+        type=int,
+        default=DEFAULT_RMW_MAX_PUBLISHERS,
+        help="RMW_UXRCE_MAX_PUBLISHERS used by the generated static library.",
+    )
+    ap.add_argument(
+        "--max-subscriptions",
+        type=int,
+        default=DEFAULT_RMW_MAX_SUBSCRIPTIONS,
+        help="RMW_UXRCE_MAX_SUBSCRIPTIONS used by the generated static library.",
+    )
+    ap.add_argument(
+        "--max-services",
+        type=int,
+        default=DEFAULT_RMW_MAX_SERVICES,
+        help="RMW_UXRCE_MAX_SERVICES used by the generated static library.",
+    )
+    ap.add_argument(
         "--clean-stage",
         action="store_true",
         help="Deprecated: staged directory is always cleaned before copying.",
@@ -246,6 +310,12 @@ def main() -> None:
     if not microros_root.is_dir():
         raise SystemExit(f"[error] micro-ROS folder not found: {microros_root}")
     microros_build_output = microros_root / "libmicroros"
+    update_rmw_entity_limits(
+        microros_root / "library_generation" / "colcon.meta",
+        args.max_publishers,
+        args.max_subscriptions,
+        args.max_services,
+    )
 
     spinal_msgs_src = args.spinal_msgs.expanduser().resolve()
     validate_ros_interface_pkg(spinal_msgs_src)

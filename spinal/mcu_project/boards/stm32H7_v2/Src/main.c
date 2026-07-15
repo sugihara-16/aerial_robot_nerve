@@ -37,6 +37,8 @@
 #include <ros_utils/ros_module_base.hpp>
 #include <ros_utils/ros_module_manager.hpp>
 #include <ros_utils/ros_context.hpp>
+#include <communication/spi_master_link.h>
+#include <communication/spi_link_ros_module.h>
 
 #include <std_msgs/msg/u_int32.h>
 #include <std_msgs/msg/u_int8.h>
@@ -99,6 +101,8 @@ I2C_HandleTypeDef hi2c1;
 I2C_HandleTypeDef hi2c3;
 
 SPI_HandleTypeDef hspi1;
+DMA_HandleTypeDef hdma_spi1_rx;
+DMA_HandleTypeDef hdma_spi1_tx;
 
 TIM_HandleTypeDef htim1;
 TIM_HandleTypeDef htim4;
@@ -124,17 +128,23 @@ osThreadId imuPublishTaskHandle;
 osThreadId voltageHandle;
 osThreadId canRxHandle;
 osThreadId servoTaskHandle;
+osThreadId spiLinkTaskHandle;
 osTimerId coreTaskTimerHandle;
 osMutexId rosPubMutexHandle;
 osMutexId flightControlMutexHandle;
+osMutexId spiBusMutexHandle;
+osMutexId spiStateMutexHandle;
 osSemaphoreId coreTaskSemHandle;
 osSemaphoreId uartTxSemHandle;
+osSemaphoreId spiTransferSemHandle;
 /* USER CODE BEGIN PV */
 osMailQId canMsgMailHandle;
+static plexus_link::SpiMasterLink spi_master_link_;
+static plexus_link::SpiLinkRosModule spi_link_ros_mod_;
 
 /* micro ros */
 static RosContext ros_cxt_;
-static RosModuleManager<8> ros_mgr_;
+static RosModuleManager<9> ros_mgr_;
 
 /* /\* sensor instances *\/ */
 ImuRosModule imu_ros_mod_;
@@ -183,6 +193,7 @@ void imuPublishTaskFunc(void const * argument);
 void voltageTask(void const * argument);
 void canRxTask(void const * argument);
 void ServoTaskCallback(void const * argument);
+void SpiLinkTask(void const * argument);
 void coreTaskEvokeCb(void const * argument);
 
 /* USER CODE BEGIN PFP */
@@ -430,6 +441,9 @@ int main(void)
     &flightControlMutexHandle);
   ros_mgr_.add(&flight_control_ros_mod_);
 
+  spi_link_ros_mod_.init_hw(&spi_master_link_);
+  ros_mgr_.add(&spi_link_ros_mod_);
+
 /*   bool nerve_connect = Spine::init(&hfdcan1, &nh_, &estimator_, &controller_, LED1_GPIO_Port, LED1_Pin); */
 
 /*   if(nerve_connect) Spine::useRTOS(&canMsgMailHandle); // use RTOS for CAN in spianl */
@@ -445,6 +459,14 @@ int main(void)
   osMutexDef(flightControlMutex);
   flightControlMutexHandle = osMutexCreate(osMutex(flightControlMutex));
 
+  /* definition and creation of spiBusMutex */
+  osMutexDef(spiBusMutex);
+  spiBusMutexHandle = osMutexCreate(osMutex(spiBusMutex));
+
+  /* definition and creation of spiStateMutex */
+  osMutexDef(spiStateMutex);
+  spiStateMutexHandle = osMutexCreate(osMutex(spiStateMutex));
+
   /* USER CODE BEGIN RTOS_MUTEX */
   /* add mutexes, ... */
   /* USER CODE END RTOS_MUTEX */
@@ -458,7 +480,18 @@ int main(void)
   osSemaphoreDef(uartTxSem);
   uartTxSemHandle = osSemaphoreCreate(osSemaphore(uartTxSem), 1);
 
+  /* definition and creation of spiTransferSem */
+  osSemaphoreDef(spiTransferSem);
+  spiTransferSemHandle = osSemaphoreCreate(osSemaphore(spiTransferSem), 1);
+
   /* USER CODE BEGIN RTOS_SEMAPHORES */
+  spi_master_link_.init(
+    &hspi1,
+    SPI1_CS_GPIO_Port,
+    SPI1_CS_Pin,
+    spiBusMutexHandle,
+    spiStateMutexHandle,
+    spiTransferSemHandle);
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
@@ -506,6 +539,10 @@ int main(void)
   /* definition and creation of servoTask */
   osThreadDef(servoTask, ServoTaskCallback, osPriorityRealtime, 0, 256);
   servoTaskHandle = osThreadCreate(osThread(servoTask), NULL);
+
+  /* definition and creation of spiLinkTask */
+  osThreadDef(spiLinkTask, SpiLinkTask, osPriorityHigh, 0, 512);
+  spiLinkTaskHandle = osThreadCreate(osThread(spiLinkTask), NULL);
 
   /* USER CODE BEGIN RTOS_THREADS */
   /* add threads, ... */
@@ -1263,6 +1300,12 @@ static void MX_DMA_Init(void)
   /* DMA2_Stream3_IRQn interrupt configuration */
   HAL_NVIC_SetPriority(DMA2_Stream3_IRQn, 5, 0);
   HAL_NVIC_EnableIRQ(DMA2_Stream3_IRQn);
+  /* DMA2_Stream4_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream4_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream4_IRQn);
+  /* DMA2_Stream5_IRQn interrupt configuration */
+  HAL_NVIC_SetPriority(DMA2_Stream5_IRQn, 5, 0);
+  HAL_NVIC_EnableIRQ(DMA2_Stream5_IRQn);
 
 }
 
@@ -1321,6 +1364,12 @@ static void MX_GPIO_Init(void)
 
 /* USER CODE BEGIN 4 */
 
+void SpiLinkTask(void const * argument)
+{
+  (void)argument;
+  spi_master_link_.run();
+}
+
 /* USER CODE END 4 */
 
 /* USER CODE BEGIN Header_coreTaskFunc */
@@ -1369,7 +1418,9 @@ void coreTaskFunc(void const * argument)
       osSemaphoreWait(coreTaskSemHandle, osWaitForever);
 
       /* Spine::send(); */
+      osMutexWait(spiBusMutexHandle, osWaitForever);
       imu_.update();
+      osMutexRelease(spiBusMutexHandle);
       baro_ros_mod_.update();
       gps_ros_mod_.update();
       estimator_ros_mod_.update();
@@ -1466,6 +1517,7 @@ void rosSpinTaskFunc(void const * argument)
           servo_ros_mod_.publish();
           thruster_ros_mod_.publish();
           flight_control_ros_mod_.publish();
+          spi_link_ros_mod_.publish();
           osMutexRelease(ros_cxt_.ros_mutex);
           osThreadYield();
         }
