@@ -60,4 +60,19 @@
       <statustip>A plugin for thruster test commands and ESC telemetry monitoring</statustip>
     </qtgui>
   </class>
+  <class
+      name="PlexusTopology"
+      type="spinal.plexus_topology.PlexusTopology"
+      base_class_type="rqt_gui_py::Plugin">
+    <description>Plexus RS-485 topology and link diagnostics plugin (ROS 2)</description>
+    <qtgui>
+      <group>
+        <icon type="theme">folder</icon>
+        <label>aerial robot</label>
+      </group>
+      <label>Plexus Topology</label>
+      <icon type="theme">network-wired</icon>
+      <statustip>Visualize the Plexus RS-485 topology and inspect node diagnostics</statustip>
+    </qtgui>
+  </class>
 </library>
