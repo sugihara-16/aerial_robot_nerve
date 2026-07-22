@@ -10,7 +10,7 @@ namespace plexus_link
 {
 
 constexpr uint32_t kFrameMagic = 0x53584C50UL;
-constexpr uint8_t kProtocolVersion = 2U;
+constexpr uint8_t kProtocolVersion = 3U;
 constexpr size_t kModuleCount = 9U;
 constexpr size_t kJointCount = 8U;
 constexpr size_t kThrusterCount = 4U;
@@ -63,6 +63,7 @@ struct NetworkTestState
   uint32_t root_physical_port;
   uint32_t parent_node_id;
   uint32_t parent_physical_port;
+  uint32_t upstream_physical_port;
   uint32_t hop_count;
 };
 
@@ -104,7 +105,7 @@ static_assert(sizeof(float) == 4U, "SPI test protocol requires 32-bit float");
 static_assert(sizeof(ImuState) == 52U, "IMU state must match the 13-float specification");
 static_assert(sizeof(ModuleState) == 152U, "Module state payload must be 152 bytes");
 static_assert(sizeof(ModuleCommand) == 64U, "Module command payload must be 64 bytes");
-static_assert(sizeof(NetworkTestState) == 40U, "Unexpected network test state size");
+static_assert(sizeof(NetworkTestState) == 44U, "Unexpected network test state size");
 static_assert(sizeof(ModuleStatePayload) == 1368U, "Nine state packets must be 1368 bytes");
 static_assert(sizeof(ModuleCommandPayload) == 576U, "Nine command packets must be 576 bytes");
 static_assert(sizeof(FrameHeader) == 32U, "SPI frame header must be one cache line");
@@ -265,6 +266,7 @@ inline void fillNetworkTestModuleState(ModuleState& state, const NetworkTestStat
   state.joint_position[4] = encodeNetworkTestHalfWord(test_state.parent_node_id, 16U);
   state.joint_position[5] = static_cast<float>(test_state.parent_physical_port);
   state.joint_position[6] = static_cast<float>(test_state.hop_count);
+  state.joint_position[7] = static_cast<float>(test_state.upstream_physical_port);
 }
 
 inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestState& test_state)
@@ -290,6 +292,7 @@ inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestSt
   uint32_t parent_high = 0U;
   uint32_t parent_physical_port = 0U;
   uint32_t hop_count = 0U;
+  uint32_t upstream_physical_port = 0U;
   if (!decodeNetworkTestHalfWord(state.imu.acceleration[0], input_low) ||
       !decodeNetworkTestHalfWord(state.imu.acceleration[1], input_high) ||
       !decodeNetworkTestHalfWord(state.imu.acceleration[2], result_low) ||
@@ -304,7 +307,8 @@ inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestSt
       !decodeNetworkTestHalfWord(state.joint_position[3], parent_low) ||
       !decodeNetworkTestHalfWord(state.joint_position[4], parent_high) ||
       !decodeNetworkTestHalfWord(state.joint_position[5], parent_physical_port) ||
-      !decodeNetworkTestHalfWord(state.joint_position[6], hop_count))
+      !decodeNetworkTestHalfWord(state.joint_position[6], hop_count) ||
+      !decodeNetworkTestHalfWord(state.joint_position[7], upstream_physical_port))
     {
       return false;
     }
@@ -318,6 +322,7 @@ inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestSt
   test_state.root_physical_port = root_physical_port;
   test_state.parent_node_id = parent_low | (parent_high << 16U);
   test_state.parent_physical_port = parent_physical_port;
+  test_state.upstream_physical_port = upstream_physical_port;
   test_state.hop_count = hop_count;
   return test_state.responder_node_id != 0U &&
          test_state.node_slot < kRemoteNodeCapacity &&
@@ -326,6 +331,8 @@ inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestSt
          test_state.parent_node_id != 0U &&
          test_state.parent_physical_port >= 2U &&
          test_state.parent_physical_port <= 5U &&
+         test_state.upstream_physical_port >= 2U &&
+         test_state.upstream_physical_port <= 5U &&
          test_state.hop_count > 0U && test_state.hop_count <= 8U &&
          test_state.result_value ==
            (test_state.input_value ^ test_state.responder_node_id);

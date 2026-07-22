@@ -107,6 +107,8 @@ void SpiLinkRosModule::publish()
       message_.rs485_parent_node_id = test_state.parent_node_id;
       message_.rs485_parent_physical_port =
         static_cast<uint8_t>(test_state.parent_physical_port);
+      message_.rs485_upstream_physical_port =
+        static_cast<uint8_t>(test_state.upstream_physical_port);
       message_.rs485_hop_count = static_cast<uint8_t>(test_state.hop_count);
     }
   else
@@ -120,6 +122,7 @@ void SpiLinkRosModule::publish()
       message_.rs485_result_value = 0U;
       message_.rs485_parent_node_id = 0U;
       message_.rs485_parent_physical_port = 0U;
+      message_.rs485_upstream_physical_port = 0U;
       message_.rs485_hop_count = 0U;
     }
 

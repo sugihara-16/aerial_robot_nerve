@@ -35,6 +35,8 @@ uint32 rs485_result_value
 # Immediate parent of the responder and the physical port on that parent.
 uint32 rs485_parent_node_id
 uint8 rs485_parent_physical_port
+# Physical port used by the responder itself to reach its immediate parent.
+uint8 rs485_upstream_physical_port
 uint8 rs485_hop_count
 
 # One active remote-node ModuleState selected round-robin. If none is active,
