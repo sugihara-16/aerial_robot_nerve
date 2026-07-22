@@ -34,6 +34,7 @@ namespace DirectServoConfigCommand
 {
   enum
   {
+    SET_BOARD_ID = 0,
     SET_SERVO_HOMING_OFFSET = 1,
     SET_SERVO_PID_GAIN = 2,
     SET_SERVO_PROFILE_VEL = 3,
@@ -52,6 +53,17 @@ struct DirectServoJointProfile
   float angle_scale{1.0f};
   int16_t zero_point_offset{0};
 };
+
+struct DirectServoBoardConfig
+{
+  uint32_t magic{0};
+  uint8_t board_id{0};
+  uint8_t board_id_inverse{0};
+  uint16_t reserved{0};
+};
+
+static_assert(sizeof(DirectServoBoardConfig) == 8,
+              "DirectServoBoardConfig flash layout must remain stable");
 
 class DirectServo
 {
@@ -88,7 +100,7 @@ public:
   unsigned int getServoNum() const { return servo_handler_.getServoNum(); }
   const ServoData& getServoData(size_t index) const { return servo_handler_.getServo()[index]; }
 
-  uint8_t getBoardId() const { return 0; }
+  uint8_t getBoardId() const;
   uint8_t getImuSendDataFlag() const { return 1; }
   uint16_t getDynamixelTtlRs485Mixed() const;
 
@@ -98,6 +110,8 @@ public:
   }
 
 private:
+  static constexpr uint32_t BOARD_CONFIG_MAGIC = 0x53424944U; // "SBID"
+  static constexpr int32_t MAX_CONFIGURABLE_BOARD_ID = 254;
   static constexpr uint32_t SERVO_PUB_INTERVAL_MS = 20;        // 50Hz
   static constexpr uint32_t SERVO_TORQUE_PUB_INTERVAL_MS = 1000; // 1Hz
 
@@ -105,6 +119,7 @@ private:
   bool setGoalPosition_(uint8_t index, int32_t goal_pos);
 
   DirectServoJointProfile joint_profiles_[MAX_SERVO_NUM]{};
+  DirectServoBoardConfig board_config_{};
 
 #if KONDO
   KondoServo servo_handler_;
