@@ -1,5 +1,7 @@
 #commands
 ## servo_index is from 0
+uint8 SET_BOARD_ID = 0
+# [board_id] (0-254; 255 is reserved for uninitialized flash)
 uint8 SET_SERVO_HOMING_OFFSET = 1
 # [servo_index, joint_offset] !torque disable!
 uint8 SET_SERVO_PID_GAIN = 2

@@ -23,6 +23,7 @@ from spinal_msgs.srv import GetBoardInfo, SetBoardConfig, SetDirectServoConfig
 
 DISCOVERY_TIMEOUT_SEC = 2.0
 SERVICE_WAIT_TIMEOUT_SEC = 2.0
+DIRECT_BOARD_ROLE = Qt.UserRole + 1
 
 
 def _ns_join(ns: str, name: str) -> str:
@@ -97,6 +98,7 @@ class BoardConfigurator(Plugin):
         self._widget.boardInfoTreeView.setEditTriggers(QAbstractItemView.NoEditTriggers)
 
         self._board_id = None
+        self._is_direct_board = False
         self._servo_index = None
         self._raw_servo_id = None
         self._command = None
@@ -208,6 +210,9 @@ class BoardConfigurator(Plugin):
         for i, board_info in enumerate(res.boards):
             board = QStandardItem(str(board_info.slave_id))
             board.setEditable(False)
+            # The firmware reports the Spinal-local board first. Keep its
+            # transport identity separate from its configurable numeric ID.
+            board.setData(i == 0, DIRECT_BOARD_ROLE)
             board.appendRow([QStandardItem('board_id'), QStandardItem(str(board_info.slave_id))])
             board.appendRow([QStandardItem('imu_send_data_flag'),
                              QStandardItem(str(bool(board_info.imu_send_data_flag)))])
@@ -267,23 +272,28 @@ class BoardConfigurator(Plugin):
         if value and param in servo_param_list:
             raw_servo_id = index.sibling(0, 1).data()
             servo_index = index.parent().data()
-            board_id = index.parent().parent().parent().data()
+            board_item = index.parent().parent().parent()
+            board_id = board_item.data()
             self._widget.paramLabel.setText(
                 'board_id: ' + board_id + ' servo_index: ' + servo_index + ' ' + param)
             self._board_id = board_id
+            self._is_direct_board = bool(board_item.data(DIRECT_BOARD_ROLE))
             self._servo_index = servo_index
             self._raw_servo_id = raw_servo_id
             self._command = param
             self._current_servo_serial_index = int(index.parent().child(1, 1).data())
         elif value and param in board_param_list:
-            board_id = index.parent().data()
+            board_item = index.parent()
+            board_id = board_item.data()
             self._widget.paramLabel.setText('board_id: ' + board_id + ' ' + param)
             self._board_id = board_id
+            self._is_direct_board = bool(board_item.data(DIRECT_BOARD_ROLE))
             self._command = param
             self._servo_index = None
             self._raw_servo_id = None
         else:
             self._board_id = None
+            self._is_direct_board = False
             self._command = None
             self._servo_index = None
             self._raw_servo_id = None
@@ -294,7 +304,7 @@ class BoardConfigurator(Plugin):
             self.node.get_logger().error('board id is not registered')
             return None, None, False, None
 
-        spinal_flag = self._board_id == '0'
+        spinal_flag = self._is_direct_board
         if spinal_flag:
             req = SetDirectServoConfig.Request()
             req_cls = SetDirectServoConfig.Request
@@ -315,10 +325,13 @@ class BoardConfigurator(Plugin):
 
         try:
             if self._command == 'board_id':
-                if spinal_flag:
-                    return
-                req.data.append(int(self._widget.lineEdit.text()))
-                req.command = req_cls.SET_SLAVE_ID
+                new_board_id = int(self._widget.lineEdit.text())
+                minimum_id = 0 if spinal_flag else 1
+                if not minimum_id <= new_board_id <= 254:
+                    raise ValueError(f'board_id must be in [{minimum_id}, 254]')
+                req.data.append(new_board_id)
+                req.command = (req_cls.SET_BOARD_ID if spinal_flag
+                               else req_cls.SET_SLAVE_ID)
             elif self._command == 'imu_send_data_flag':
                 if spinal_flag:
                     return
@@ -366,7 +379,7 @@ class BoardConfigurator(Plugin):
             else:
                 return
         except ValueError as e:
-            print(e)
+            self.node.get_logger().error(str(e))
             return
 
         self.node.get_logger().info(f'command: {req.command}')

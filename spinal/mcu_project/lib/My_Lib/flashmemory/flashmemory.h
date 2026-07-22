@@ -17,8 +17,8 @@ namespace FlashMemory {
 	void init(uint32_t data_address, uint32_t data_sector);
 	void addValue(void* ptr, size_t size);
 	HAL_StatusTypeDef read();
-	void erase();
-	void write();
+	HAL_StatusTypeDef erase();
+	HAL_StatusTypeDef write();
 	bool isLock();
 }
 

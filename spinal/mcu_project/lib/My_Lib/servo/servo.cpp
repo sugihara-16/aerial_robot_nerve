@@ -30,6 +30,11 @@ bool DirectServo::init(UART_HandleTypeDef* huart, osMutexId* mutex)
 #endif
 
   servo_handler_.init(huart, mutex);
+  // Append the board identity to the existing flash layout. The handler has
+  // already registered and loaded the servo settings, so load again after
+  // registering this final value.
+  FlashMemory::addValue(&board_config_, sizeof(board_config_));
+  FlashMemory::read();
 
   if (servo_handler_.getServoNum() == 0) {
 #if !STM32H7_V2
@@ -94,6 +99,25 @@ void DirectServo::applyJointProfiles(const DirectServoJointProfile* profiles, si
 bool DirectServo::applyConfigCommand(uint8_t command, const int32_t* data, size_t data_size)
 {
   if (data == nullptr && data_size > 0) return false;
+
+  if (command == DirectServoConfigCommand::SET_BOARD_ID) {
+    if (data_size != 1 || data[0] < 0 || data[0] > MAX_CONFIGURABLE_BOARD_ID) return false;
+
+    const uint8_t board_id = static_cast<uint8_t>(data[0]);
+    board_config_.magic = BOARD_CONFIG_MAGIC;
+    board_config_.board_id = board_id;
+    board_config_.board_id_inverse = static_cast<uint8_t>(~board_id);
+    board_config_.reserved = 0;
+
+    if (FlashMemory::erase() != HAL_OK) return false;
+    if (FlashMemory::write() != HAL_OK) return false;
+
+    // Verify the value copied back from flash rather than the in-RAM value
+    // that was just assigned above.
+    board_config_ = {};
+    if (FlashMemory::read() != HAL_OK) return false;
+    return getBoardId() == board_id;
+  }
 
   if (command == DirectServoConfigCommand::SET_DYNAMIXEL_TTL_RS485_MIXED) {
     if (data_size < 1) return false;
@@ -181,6 +205,14 @@ bool DirectServo::applyConfigCommand(uint8_t command, const int32_t* data, size_
     default:
       return false;
   }
+}
+
+uint8_t DirectServo::getBoardId() const
+{
+  if (board_config_.magic != BOARD_CONFIG_MAGIC) return 0;
+  if (board_config_.board_id > MAX_CONFIGURABLE_BOARD_ID) return 0;
+  if (board_config_.board_id_inverse != static_cast<uint8_t>(~board_config_.board_id)) return 0;
+  return board_config_.board_id;
 }
 
 bool DirectServo::statePublishReady(bool flag_send_asap) const

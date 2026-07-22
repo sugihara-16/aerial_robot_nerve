@@ -59,13 +59,14 @@ namespace FlashMemory {
     return status;
   }
 
-  void erase(){
-    HAL_StatusTypeDef r;
-
+  HAL_StatusTypeDef erase(){
     lock = true;
 
-    r = HAL_FLASH_Unlock();
-    if( r != HAL_OK ) return;
+    HAL_StatusTypeDef status = HAL_FLASH_Unlock();
+    if (status != HAL_OK) {
+      lock = false;
+      return status;
+    }
 
     FLASH_EraseInitTypeDef EraseInitStruct;
     uint32_t SectorError = 0;
@@ -77,22 +78,31 @@ namespace FlashMemory {
     EraseInitStruct.NbSectors = 1;
     EraseInitStruct.VoltageRange = FLASH_VOLTAGE_RANGE_3;
 
-    r = HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
-    if ( r != HAL_OK ) return;
-    r = HAL_FLASH_Lock();
+    status = HAL_FLASHEx_Erase(&EraseInitStruct, &SectorError);
+    const HAL_StatusTypeDef lock_status = HAL_FLASH_Lock();
+    if (status == HAL_OK) status = lock_status;
+
+    // Keep publishing paused only between a successful erase and its write.
+    // A failed flash operation must not leave the ROS task disabled forever.
+    if (status != HAL_OK) lock = false;
+    return status;
   }
 
-  void write(){
-    HAL_StatusTypeDef r;
-
-    r = HAL_FLASH_Unlock();
-    if( r != HAL_OK ) return;
+  HAL_StatusTypeDef write(){
+    HAL_StatusTypeDef status = HAL_FLASH_Unlock();
+    if (status != HAL_OK) {
+      lock = false;
+      return status;
+    }
 
     uint32_t data_address = m_data_address;
 #ifdef STM32F7
-    for (unsigned int i = 0; i != data.size(); i++){
-      for (unsigned int j = 0; j != data[i].size; j++) {
-        HAL_FLASH_Program(FLASH_TYPEPROGRAM_BYTE, data_address + j, *(static_cast<uint8_t*>(data[i].ptr) + j));
+    for (unsigned int i = 0; i != data.size() && status == HAL_OK; i++){
+      for (unsigned int j = 0; j != data[i].size && status == HAL_OK; j++) {
+        status = HAL_FLASH_Program(
+          FLASH_TYPEPROGRAM_BYTE,
+          data_address + j,
+          *(static_cast<uint8_t*>(data[i].ptr) + j));
       }
       data_address += data[i].size;
     }
@@ -105,32 +115,39 @@ namespace FlashMemory {
     memset(temp_data, 0, FLASHWORD_SIZE);
     uint8_t byte_cnt = 0;
 
-    for (unsigned int i = 0; i != data.size(); i++){
-      for (unsigned int j = 0; j != data[i].size; j++) {
+    for (unsigned int i = 0; i != data.size() && status == HAL_OK; i++){
+      for (unsigned int j = 0; j != data[i].size && status == HAL_OK; j++) {
         memcpy(temp_data + byte_cnt, static_cast<uint8_t*>(data[i].ptr) + j, 1);
         byte_cnt++;
         if (byte_cnt == FLASHWORD_SIZE){
-          HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD, data_address, (uint32_t)temp_data);
+          status = HAL_FLASH_Program(
+            FLASH_TYPEPROGRAM_FLASHWORD,
+            data_address,
+            reinterpret_cast<uint32_t>(temp_data));
           data_address += 32;
           byte_cnt = 0;
         }
       }
     }
-    if (byte_cnt > 0){
-      HAL_FLASH_Program(FLASH_TYPEPROGRAM_FLASHWORD, data_address, (uint32_t)temp_data); // residual data
+    if (byte_cnt > 0 && status == HAL_OK){
+      status = HAL_FLASH_Program(
+        FLASH_TYPEPROGRAM_FLASHWORD,
+        data_address,
+        reinterpret_cast<uint32_t>(temp_data)); // residual data
     }
 
 #endif
 
-    r = HAL_FLASH_Lock();
+    const HAL_StatusTypeDef lock_status = HAL_FLASH_Lock();
+    if (status == HAL_OK) status = lock_status;
 
     lock = false;
+    return status;
   }
 
   bool isLock() {
     return lock;
   }
 }
-
 
 

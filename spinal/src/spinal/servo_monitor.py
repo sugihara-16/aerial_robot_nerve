@@ -269,6 +269,7 @@ class ServoMonitor(Plugin):
         self._widget.servoTableWidget.addAction(board_reboot_action)
 
         self._table_data = []
+        self._direct_servo_indices = set()
         self._servo_num = 0
         self._selected_servo_index = None
         self._last_target_pub_time = 0.0
@@ -449,7 +450,7 @@ class ServoMonitor(Plugin):
         servo_id = int(self._widget.servoTableWidget.item(
             servo_index, self._headers.index('index')).text())
 
-        if board_id == 0:
+        if servo_index in self._direct_servo_indices:
             req = SetDirectServoConfig.Request()
             req.data = [servo_id]
             req.command = SetDirectServoConfig.Request.SET_SERVO_HOMING_OFFSET
@@ -482,7 +483,7 @@ class ServoMonitor(Plugin):
 
         board_id = int(self._widget.servoTableWidget.item(
             servo_index, self._headers.index('board')).text())
-        if board_id == 0:
+        if servo_index in self._direct_servo_indices:
             self.node.get_logger().error('Spinal cannot be rebooted from rqt')
             return
 
@@ -581,9 +582,12 @@ class ServoMonitor(Plugin):
         servo_index = 0
         self._servo_num = 0
         self._table_data = []
+        self._direct_servo_indices = set()
 
-        for board in res.boards:
+        for board_index, board in enumerate(res.boards):
             for i, servo in enumerate(board.servos):
+                if board_index == 0:
+                    self._direct_servo_indices.add(servo_index)
                 row_data = [
                     None,
                     self.joint_id_name_map.get(servo_index),
