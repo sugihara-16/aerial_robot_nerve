@@ -419,9 +419,9 @@ int main(void)
   FlashMemory::read(); // battery scale and IMU calib data (including IMU in neurons)
 
   const bool servo_connect = servo_ros_mod_.init_hw(&huart2, nullptr);
-  if (servo_connect) {
-    ros_mgr_.add(&servo_ros_mod_);
-  }
+  // Keep the board-configuration services available even when no servo is
+  // detected at boot. Runtime servo I/O remains disabled by servo_connect.
+  ros_mgr_.add(&servo_ros_mod_);
 
   flight_control_ros_mod_.init_hw(
     estimator_ros_mod_.getStateEstimateCore(),
