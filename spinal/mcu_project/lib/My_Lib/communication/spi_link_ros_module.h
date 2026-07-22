@@ -35,7 +35,7 @@ private:
   ModuleStatePayload state_snapshot_{};
   SpiLinkDiagnostics diagnostics_snapshot_{};
   uint32_t last_publish_tick_ms_{0U};
-  uint8_t next_module_index_{0U};
+  uint8_t next_module_index_{static_cast<uint8_t>(kFirstRemoteNodeSlot)};
 };
 
 }  // namespace plexus_link
