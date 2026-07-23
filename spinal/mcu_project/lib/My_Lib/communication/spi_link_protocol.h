@@ -10,7 +10,7 @@ namespace plexus_link
 {
 
 constexpr uint32_t kFrameMagic = 0x53584C50UL;
-constexpr uint8_t kProtocolVersion = 6U;
+constexpr uint8_t kProtocolVersion = 7U;
 constexpr uint32_t kUnassignedNodeId = 0U;
 constexpr uint32_t kMaximumNodeId = 254U;
 constexpr size_t kModuleCount = 9U;
@@ -78,6 +78,17 @@ struct ModuleCommand
   float target_joint_offset[kJointOffsetCount];
 };
 
+struct RemoteCommandEnvelope
+{
+  uint32_t origin_node_id;
+  uint32_t destination_node_id;
+  uint32_t control_cycle;
+  uint16_t valid_for_ms;
+  uint8_t valid;
+  uint8_t reserved;
+  ModuleCommand command;
+};
+
 struct NetworkTestState
 {
   uint32_t transaction_id;
@@ -98,6 +109,7 @@ struct ModuleStatePayload
 {
   ModuleState modules[kModuleCount];
   RemoteJointSampleEnvelope remote_joint;
+  RemoteCommandEnvelope remote_command;
 };
 
 struct ModuleCommandPayload
@@ -139,8 +151,10 @@ static_assert(sizeof(RemoteJointSampleEnvelope) == 48U,
               "Unexpected remote joint envelope size");
 static_assert(sizeof(ModuleState) == 152U, "Module state payload must be 152 bytes");
 static_assert(sizeof(ModuleCommand) == 64U, "Module command payload must be 64 bytes");
+static_assert(sizeof(RemoteCommandEnvelope) == 80U,
+              "Unexpected remote command envelope size");
 static_assert(sizeof(NetworkTestState) == 104U, "Unexpected network test state size");
-static_assert(sizeof(ModuleStatePayload) == 1416U, "Unexpected state payload size");
+static_assert(sizeof(ModuleStatePayload) == 1496U, "Unexpected state payload size");
 static_assert(sizeof(ModuleCommandPayload) == 676U, "Unexpected command payload size");
 static_assert(sizeof(FrameHeader) == 32U, "SPI frame header must be one cache line");
 static_assert(sizeof(Frame) == kFrameSize, "SPI frame must be 1536 bytes");
@@ -274,6 +288,7 @@ inline void fillVirtualModuleState(ModuleState& state, size_t module_index, uint
 inline void fillVirtualStatePayload(ModuleStatePayload& payload, uint32_t cycle_counter)
 {
   payload.remote_joint = {};
+  payload.remote_command = {};
   for (size_t module = 0; module < kModuleCount; ++module)
     {
       fillVirtualModuleState(payload.modules[module], module, cycle_counter);
@@ -300,6 +315,32 @@ inline bool finiteImuValue(float value)
   uint32_t bits = 0U;
   std::memcpy(&bits, &value, sizeof(bits));
   return (bits & 0x7F800000UL) != 0x7F800000UL;
+}
+
+inline bool validateModuleCommand(const ModuleCommand& command)
+{
+  for (size_t index = 0U; index < kThrusterCount; ++index)
+    {
+      if (!finiteImuValue(command.target_thrust[index]))
+        {
+          return false;
+        }
+    }
+  for (size_t index = 0U; index < kJointCount; ++index)
+    {
+      if (!finiteImuValue(command.target_joint_angle[index]))
+        {
+          return false;
+        }
+    }
+  for (size_t index = 0U; index < kJointOffsetCount; ++index)
+    {
+      if (!finiteImuValue(command.target_joint_offset[index]))
+        {
+          return false;
+        }
+    }
+  return true;
 }
 
 inline bool validateSpinalImuSample(const SpinalImuSample& sample)
@@ -352,6 +393,30 @@ inline bool validateRemoteJointSampleEnvelope(const RemoteJointSampleEnvelope& e
   return isValidNodeId(envelope.node_id) &&
          envelope.node_slot < kRemoteNodeCapacity &&
          validateSpinalJointSample(envelope.sample);
+}
+
+inline bool validateRemoteCommandEnvelope(const RemoteCommandEnvelope& envelope)
+{
+  if (envelope.valid > 1U || envelope.reserved != 0U)
+    {
+      return false;
+    }
+  if (envelope.valid == 0U)
+    {
+      const ModuleCommand empty_command{};
+      return envelope.origin_node_id == 0U &&
+             envelope.destination_node_id == 0U &&
+             envelope.control_cycle == 0U &&
+             envelope.valid_for_ms == 0U &&
+             std::memcmp(
+               &envelope.command, &empty_command, sizeof(envelope.command)) == 0;
+    }
+  return isValidNodeId(envelope.origin_node_id) &&
+         isValidNodeId(envelope.destination_node_id) &&
+         envelope.origin_node_id != envelope.destination_node_id &&
+         envelope.valid_for_ms > 0U &&
+         envelope.valid_for_ms <= 100U &&
+         validateModuleCommand(envelope.command);
 }
 
 inline void fillNetworkTestModuleState(ModuleState& state, const NetworkTestState& test_state)
@@ -535,7 +600,8 @@ inline bool virtualModuleStateMatches(const ModuleState& actual,
 
 inline bool validateVirtualStatePayload(const ModuleStatePayload& payload, uint32_t cycle_counter)
 {
-  if (!validateRemoteJointSampleEnvelope(payload.remote_joint))
+  if (!validateRemoteJointSampleEnvelope(payload.remote_joint) ||
+      !validateRemoteCommandEnvelope(payload.remote_command))
     {
       return false;
     }
