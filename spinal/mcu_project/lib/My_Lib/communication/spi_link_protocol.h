@@ -10,7 +10,9 @@ namespace plexus_link
 {
 
 constexpr uint32_t kFrameMagic = 0x53584C50UL;
-constexpr uint8_t kProtocolVersion = 3U;
+constexpr uint8_t kProtocolVersion = 6U;
+constexpr uint32_t kUnassignedNodeId = 0U;
+constexpr uint32_t kMaximumNodeId = 254U;
 constexpr size_t kModuleCount = 9U;
 constexpr size_t kJointCount = 8U;
 constexpr size_t kThrusterCount = 4U;
@@ -34,6 +36,30 @@ struct ImuState
   float angular_velocity[3];
   float magnetic_field[3];
   float quaternion[4];
+};
+
+struct SpinalImuSample
+{
+  ImuState imu;
+  uint32_t timestamp_ms;
+  uint32_t valid;
+};
+
+struct SpinalJointSample
+{
+  int16_t position[kJointCount];
+  int16_t load[kJointCount];
+  uint32_t timestamp_ms;
+  uint8_t count;
+  uint8_t valid;
+  uint16_t reserved;
+};
+
+struct RemoteJointSampleEnvelope
+{
+  uint32_t node_id;
+  uint32_t node_slot;
+  SpinalJointSample sample;
 };
 
 struct ModuleState
@@ -65,16 +91,20 @@ struct NetworkTestState
   uint32_t parent_physical_port;
   uint32_t upstream_physical_port;
   uint32_t hop_count;
+  SpinalImuSample spinal_imu;
 };
 
 struct ModuleStatePayload
 {
   ModuleState modules[kModuleCount];
+  RemoteJointSampleEnvelope remote_joint;
 };
 
 struct ModuleCommandPayload
 {
   ModuleCommand modules[kModuleCount];
+  SpinalImuSample local_imu;
+  SpinalJointSample local_joint;
 };
 
 struct FrameHeader
@@ -90,7 +120,7 @@ struct FrameHeader
   uint32_t timestamp_ms;
   uint32_t payload_crc32;
   uint32_t header_crc32;
-  uint32_t reserved;
+  uint32_t source_node_id;
 };
 
 constexpr size_t kFramePayloadCapacity = kFrameSize - sizeof(FrameHeader);
@@ -103,11 +133,15 @@ struct Frame
 
 static_assert(sizeof(float) == 4U, "SPI test protocol requires 32-bit float");
 static_assert(sizeof(ImuState) == 52U, "IMU state must match the 13-float specification");
+static_assert(sizeof(SpinalImuSample) == 60U, "Unexpected Spinal IMU sample size");
+static_assert(sizeof(SpinalJointSample) == 40U, "Unexpected Spinal joint sample size");
+static_assert(sizeof(RemoteJointSampleEnvelope) == 48U,
+              "Unexpected remote joint envelope size");
 static_assert(sizeof(ModuleState) == 152U, "Module state payload must be 152 bytes");
 static_assert(sizeof(ModuleCommand) == 64U, "Module command payload must be 64 bytes");
-static_assert(sizeof(NetworkTestState) == 44U, "Unexpected network test state size");
-static_assert(sizeof(ModuleStatePayload) == 1368U, "Nine state packets must be 1368 bytes");
-static_assert(sizeof(ModuleCommandPayload) == 576U, "Nine command packets must be 576 bytes");
+static_assert(sizeof(NetworkTestState) == 104U, "Unexpected network test state size");
+static_assert(sizeof(ModuleStatePayload) == 1416U, "Unexpected state payload size");
+static_assert(sizeof(ModuleCommandPayload) == 676U, "Unexpected command payload size");
 static_assert(sizeof(FrameHeader) == 32U, "SPI frame header must be one cache line");
 static_assert(sizeof(Frame) == kFrameSize, "SPI frame must be 1536 bytes");
 static_assert(kFirstRemoteNodeSlot + kRemoteNodeCapacity == kModuleCount,
@@ -125,7 +159,17 @@ static_assert(offsetof(FrameHeader, payload_size) == 12U, "Unexpected header fie
 static_assert(offsetof(FrameHeader, timestamp_ms) == 16U, "Unexpected header field layout");
 static_assert(offsetof(FrameHeader, payload_crc32) == 20U, "Unexpected header field layout");
 static_assert(offsetof(FrameHeader, header_crc32) == 24U, "Unexpected header field layout");
-static_assert(offsetof(FrameHeader, reserved) == 28U, "Unexpected header field layout");
+static_assert(offsetof(FrameHeader, source_node_id) == 28U, "Unexpected header field layout");
+
+inline bool isValidNodeId(uint32_t node_id)
+{
+  return node_id > kUnassignedNodeId && node_id <= kMaximumNodeId;
+}
+
+inline bool isWireNodeId(uint32_t node_id)
+{
+  return node_id == kUnassignedNodeId || isValidNodeId(node_id);
+}
 
 inline uint32_t crc32(const void* data, size_t length)
 {
@@ -148,8 +192,8 @@ inline uint32_t crc32(const void* data, size_t length)
 }
 
 template<typename Payload>
-inline void buildFrame(Frame& frame, FrameDirection direction, uint32_t cycle_counter,
-                       uint32_t timestamp_ms, const Payload& payload)
+inline void buildFrame(Frame& frame, FrameDirection direction, uint32_t source_node_id,
+                       uint32_t cycle_counter, uint32_t timestamp_ms, const Payload& payload)
 {
   static_assert(sizeof(Payload) <= kFramePayloadCapacity, "Payload does not fit in SPI frame");
   std::memset(&frame, 0, sizeof(frame));
@@ -163,6 +207,9 @@ inline void buildFrame(Frame& frame, FrameDirection direction, uint32_t cycle_co
   frame.header.module_count = static_cast<uint8_t>(kModuleCount);
   frame.header.flags = 0U;
   frame.header.timestamp_ms = timestamp_ms;
+  frame.header.source_node_id = isWireNodeId(source_node_id)
+    ? source_node_id
+    : kUnassignedNodeId;
   frame.header.payload_crc32 = crc32(frame.payload, sizeof(payload));
   frame.header.header_crc32 = crc32(&frame.header, offsetof(FrameHeader, header_crc32));
 }
@@ -174,7 +221,8 @@ inline bool validateFrame(const Frame& frame, FrameDirection expected_direction,
       frame.header.direction != static_cast<uint8_t>(expected_direction) ||
       frame.header.header_size != sizeof(FrameHeader) ||
       frame.header.payload_size != expected_payload_size ||
-      frame.header.module_count != kModuleCount || frame.header.reserved != 0U)
+      frame.header.module_count != kModuleCount ||
+      !isWireNodeId(frame.header.source_node_id))
     {
       return false;
     }
@@ -225,6 +273,7 @@ inline void fillVirtualModuleState(ModuleState& state, size_t module_index, uint
 
 inline void fillVirtualStatePayload(ModuleStatePayload& payload, uint32_t cycle_counter)
 {
+  payload.remote_joint = {};
   for (size_t module = 0; module < kModuleCount; ++module)
     {
       fillVirtualModuleState(payload.modules[module], module, cycle_counter);
@@ -246,33 +295,97 @@ inline bool decodeNetworkTestHalfWord(float value, uint32_t& half_word)
   return static_cast<float>(half_word) == value;
 }
 
+inline bool finiteImuValue(float value)
+{
+  uint32_t bits = 0U;
+  std::memcpy(&bits, &value, sizeof(bits));
+  return (bits & 0x7F800000UL) != 0x7F800000UL;
+}
+
+inline bool validateSpinalImuSample(const SpinalImuSample& sample)
+{
+  if (sample.valid > 1U)
+    {
+      return false;
+    }
+  if (sample.valid == 0U)
+    {
+      return true;
+    }
+  for (size_t axis = 0U; axis < 3U; ++axis)
+    {
+      if (!finiteImuValue(sample.imu.acceleration[axis]) ||
+          !finiteImuValue(sample.imu.angular_velocity[axis]) ||
+          !finiteImuValue(sample.imu.magnetic_field[axis]))
+        {
+          return false;
+        }
+    }
+  for (size_t component = 0U; component < 4U; ++component)
+    {
+      if (!finiteImuValue(sample.imu.quaternion[component]))
+        {
+          return false;
+        }
+    }
+  return true;
+}
+
+inline bool validateSpinalJointSample(const SpinalJointSample& sample)
+{
+  return sample.valid <= 1U &&
+         sample.count <= kJointCount &&
+         sample.reserved == 0U &&
+         (sample.valid != 0U || sample.count == 0U);
+}
+
+inline bool validateRemoteJointSampleEnvelope(const RemoteJointSampleEnvelope& envelope)
+{
+  if (envelope.node_id == kUnassignedNodeId)
+    {
+      return envelope.node_slot == 0U &&
+             envelope.sample.valid == 0U &&
+             envelope.sample.count == 0U &&
+             envelope.sample.timestamp_ms == 0U &&
+             envelope.sample.reserved == 0U;
+    }
+  return isValidNodeId(envelope.node_id) &&
+         envelope.node_slot < kRemoteNodeCapacity &&
+         validateSpinalJointSample(envelope.sample);
+}
+
 inline void fillNetworkTestModuleState(ModuleState& state, const NetworkTestState& test_state)
 {
   state = {};
-  state.imu.acceleration[0] = encodeNetworkTestHalfWord(test_state.input_value, 0U);
-  state.imu.acceleration[1] = encodeNetworkTestHalfWord(test_state.input_value, 16U);
-  state.imu.acceleration[2] = encodeNetworkTestHalfWord(test_state.result_value, 0U);
-  state.imu.angular_velocity[0] = encodeNetworkTestHalfWord(test_state.result_value, 16U);
-  state.imu.angular_velocity[1] = encodeNetworkTestHalfWord(test_state.responder_node_id, 0U);
-  state.imu.angular_velocity[2] = encodeNetworkTestHalfWord(test_state.responder_node_id, 16U);
-  state.imu.magnetic_field[0] = encodeNetworkTestHalfWord(test_state.transaction_id, 0U);
-  state.imu.magnetic_field[1] = encodeNetworkTestHalfWord(test_state.transaction_id, 16U);
-  state.imu.magnetic_field[2] = kNetworkTestStateMarker;
-  state.imu.quaternion[3] = 1.0F;
-  state.joint_position[0] = static_cast<float>(test_state.node_slot);
-  state.joint_position[1] = static_cast<float>(test_state.root_port_index);
-  state.joint_position[2] = static_cast<float>(test_state.root_physical_port);
-  state.joint_position[3] = encodeNetworkTestHalfWord(test_state.parent_node_id, 0U);
-  state.joint_position[4] = encodeNetworkTestHalfWord(test_state.parent_node_id, 16U);
-  state.joint_position[5] = static_cast<float>(test_state.parent_physical_port);
-  state.joint_position[6] = static_cast<float>(test_state.hop_count);
-  state.joint_position[7] = static_cast<float>(test_state.upstream_physical_port);
+  if (test_state.spinal_imu.valid != 0U)
+    {
+      state.imu = test_state.spinal_imu.imu;
+    }
+  state.joint_position[0] = encodeNetworkTestHalfWord(test_state.transaction_id, 0U);
+  state.joint_position[1] = encodeNetworkTestHalfWord(test_state.transaction_id, 16U);
+  state.joint_position[2] = encodeNetworkTestHalfWord(test_state.input_value, 0U);
+  state.joint_position[3] = encodeNetworkTestHalfWord(test_state.input_value, 16U);
+  state.joint_position[4] = encodeNetworkTestHalfWord(test_state.responder_node_id, 0U);
+  state.joint_position[5] = encodeNetworkTestHalfWord(test_state.responder_node_id, 16U);
+  state.joint_position[6] = encodeNetworkTestHalfWord(test_state.result_value, 0U);
+  state.joint_position[7] = encodeNetworkTestHalfWord(test_state.result_value, 16U);
+  state.joint_velocity[0] = static_cast<float>(test_state.node_slot);
+  state.joint_velocity[1] = static_cast<float>(test_state.root_port_index);
+  state.joint_velocity[2] = static_cast<float>(test_state.root_physical_port);
+  state.joint_velocity[3] = encodeNetworkTestHalfWord(test_state.parent_node_id, 0U);
+  state.joint_velocity[4] = encodeNetworkTestHalfWord(test_state.parent_node_id, 16U);
+  state.joint_velocity[5] = static_cast<float>(test_state.parent_physical_port);
+  state.joint_velocity[6] = static_cast<float>(test_state.hop_count);
+  state.joint_velocity[7] = static_cast<float>(test_state.upstream_physical_port);
+  state.joint_torque[0] = encodeNetworkTestHalfWord(test_state.spinal_imu.timestamp_ms, 0U);
+  state.joint_torque[1] = encodeNetworkTestHalfWord(test_state.spinal_imu.timestamp_ms, 16U);
+  state.joint_torque[2] = kNetworkTestStateMarker;
+  state.joint_torque[3] = static_cast<float>(test_state.spinal_imu.valid);
 }
 
 inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestState& test_state)
 {
-  if (state.imu.magnetic_field[2] != kNetworkTestStateMarker ||
-      state.imu.quaternion[3] != 1.0F)
+  if (state.joint_torque[2] != kNetworkTestStateMarker)
     {
       return false;
     }
@@ -293,22 +406,28 @@ inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestSt
   uint32_t parent_physical_port = 0U;
   uint32_t hop_count = 0U;
   uint32_t upstream_physical_port = 0U;
-  if (!decodeNetworkTestHalfWord(state.imu.acceleration[0], input_low) ||
-      !decodeNetworkTestHalfWord(state.imu.acceleration[1], input_high) ||
-      !decodeNetworkTestHalfWord(state.imu.acceleration[2], result_low) ||
-      !decodeNetworkTestHalfWord(state.imu.angular_velocity[0], result_high) ||
-      !decodeNetworkTestHalfWord(state.imu.angular_velocity[1], node_low) ||
-      !decodeNetworkTestHalfWord(state.imu.angular_velocity[2], node_high) ||
-      !decodeNetworkTestHalfWord(state.imu.magnetic_field[0], transaction_low) ||
-      !decodeNetworkTestHalfWord(state.imu.magnetic_field[1], transaction_high) ||
-      !decodeNetworkTestHalfWord(state.joint_position[0], node_slot) ||
-      !decodeNetworkTestHalfWord(state.joint_position[1], root_port_index) ||
-      !decodeNetworkTestHalfWord(state.joint_position[2], root_physical_port) ||
-      !decodeNetworkTestHalfWord(state.joint_position[3], parent_low) ||
-      !decodeNetworkTestHalfWord(state.joint_position[4], parent_high) ||
-      !decodeNetworkTestHalfWord(state.joint_position[5], parent_physical_port) ||
-      !decodeNetworkTestHalfWord(state.joint_position[6], hop_count) ||
-      !decodeNetworkTestHalfWord(state.joint_position[7], upstream_physical_port))
+  uint32_t imu_timestamp_low = 0U;
+  uint32_t imu_timestamp_high = 0U;
+  uint32_t imu_valid = 0U;
+  if (!decodeNetworkTestHalfWord(state.joint_position[0], transaction_low) ||
+      !decodeNetworkTestHalfWord(state.joint_position[1], transaction_high) ||
+      !decodeNetworkTestHalfWord(state.joint_position[2], input_low) ||
+      !decodeNetworkTestHalfWord(state.joint_position[3], input_high) ||
+      !decodeNetworkTestHalfWord(state.joint_position[4], node_low) ||
+      !decodeNetworkTestHalfWord(state.joint_position[5], node_high) ||
+      !decodeNetworkTestHalfWord(state.joint_position[6], result_low) ||
+      !decodeNetworkTestHalfWord(state.joint_position[7], result_high) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[0], node_slot) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[1], root_port_index) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[2], root_physical_port) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[3], parent_low) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[4], parent_high) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[5], parent_physical_port) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[6], hop_count) ||
+      !decodeNetworkTestHalfWord(state.joint_velocity[7], upstream_physical_port) ||
+      !decodeNetworkTestHalfWord(state.joint_torque[0], imu_timestamp_low) ||
+      !decodeNetworkTestHalfWord(state.joint_torque[1], imu_timestamp_high) ||
+      !decodeNetworkTestHalfWord(state.joint_torque[3], imu_valid))
     {
       return false;
     }
@@ -324,6 +443,10 @@ inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestSt
   test_state.parent_physical_port = parent_physical_port;
   test_state.upstream_physical_port = upstream_physical_port;
   test_state.hop_count = hop_count;
+  test_state.spinal_imu.imu = state.imu;
+  test_state.spinal_imu.timestamp_ms =
+    imu_timestamp_low | (imu_timestamp_high << 16U);
+  test_state.spinal_imu.valid = imu_valid;
   return test_state.responder_node_id != 0U &&
          test_state.node_slot < kRemoteNodeCapacity &&
          test_state.root_port_index < kRs485PortCount &&
@@ -334,6 +457,7 @@ inline bool decodeNetworkTestModuleState(const ModuleState& state, NetworkTestSt
          test_state.upstream_physical_port >= 2U &&
          test_state.upstream_physical_port <= 5U &&
          test_state.hop_count > 0U && test_state.hop_count <= 8U &&
+         validateSpinalImuSample(test_state.spinal_imu) &&
          test_state.result_value ==
            (test_state.input_value ^ test_state.responder_node_id);
 }
@@ -361,6 +485,8 @@ inline void fillVirtualModuleCommand(ModuleCommand& command, size_t module_index
 
 inline void fillVirtualCommandPayload(ModuleCommandPayload& payload, uint32_t cycle_counter)
 {
+  payload.local_imu = {};
+  payload.local_joint = {};
   for (size_t module = 0; module < kModuleCount; ++module)
     {
       fillVirtualModuleCommand(payload.modules[module], module, cycle_counter);
@@ -409,6 +535,10 @@ inline bool virtualModuleStateMatches(const ModuleState& actual,
 
 inline bool validateVirtualStatePayload(const ModuleStatePayload& payload, uint32_t cycle_counter)
 {
+  if (!validateRemoteJointSampleEnvelope(payload.remote_joint))
+    {
+      return false;
+    }
   for (size_t module = 0; module < kModuleCount; ++module)
     {
       NetworkTestState test_state{};
@@ -459,7 +589,8 @@ inline bool validateVirtualCommandPayload(const ModuleCommandPayload& payload,
             }
         }
     }
-  return true;
+  return validateSpinalImuSample(payload.local_imu) &&
+         validateSpinalJointSample(payload.local_joint);
 }
 
 }  // namespace plexus_link

@@ -87,6 +87,17 @@ class NodeSnapshot:
     transaction_id: int = 0
     input_value: int = 0
     result_value: int = 0
+    imu_valid: bool = False
+    imu_timestamp_ms: int = 0
+    acceleration: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    angular_velocity: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    magnetic_field: Tuple[float, float, float] = (0.0, 0.0, 0.0)
+    quaternion: Tuple[float, float, float, float] = (0.0, 0.0, 0.0, 0.0)
+    joint_valid: bool = False
+    joint_timestamp_ms: int = 0
+    joint_count: int = 0
+    joint_position_raw: Tuple[int, ...] = ()
+    joint_load_raw: Tuple[int, ...] = ()
     last_seen: float = 0.0
     placeholder: bool = False
 
@@ -100,6 +111,9 @@ class NodeSnapshot:
 class LinkSnapshot:
     received: bool = False
     link_active: bool = False
+    local_node_id: int = 0
+    plexus_node_id: int = 0
+    node_identity_valid: bool = False
     active_node_count: int = 0
     module_count: int = 0
     last_received_cycle: int = 0
@@ -114,6 +128,7 @@ class LinkSnapshot:
     dma_start_errors: int = 0
     timeouts: int = 0
     peripheral_errors: int = 0
+    node_identity_mismatches: int = 0
     last_message_time: float = 0.0
 
 
@@ -131,6 +146,9 @@ class TopologyModel:
         self.link = LinkSnapshot(
             received=True,
             link_active=bool(message.link_active),
+            local_node_id=int(message.local_node_id),
+            plexus_node_id=int(message.plexus_node_id),
+            node_identity_valid=bool(message.node_identity_valid),
             active_node_count=int(message.active_rs485_node_count),
             module_count=int(message.module_count),
             last_received_cycle=int(message.last_received_cycle),
@@ -145,6 +163,7 @@ class TopologyModel:
             dma_start_errors=int(message.dma_start_errors),
             timeouts=int(message.timeouts),
             peripheral_errors=int(message.peripheral_errors),
+            node_identity_mismatches=int(message.node_identity_mismatches),
             last_message_time=now,
         )
 
@@ -177,6 +196,22 @@ class TopologyModel:
             transaction_id=int(message.rs485_transaction_id),
             input_value=int(message.rs485_input_value),
             result_value=int(message.rs485_result_value),
+            imu_valid=bool(message.remote_imu_valid),
+            imu_timestamp_ms=int(message.remote_imu_timestamp_ms),
+            acceleration=tuple(float(value) for value in message.acceleration),
+            angular_velocity=tuple(float(value) for value in message.angular_velocity),
+            magnetic_field=tuple(float(value) for value in message.magnetic_field),
+            quaternion=tuple(float(value) for value in message.quaternion),
+            joint_valid=bool(getattr(message, 'remote_joint_valid', False)),
+            joint_timestamp_ms=int(
+                getattr(message, 'remote_joint_timestamp_ms', 0)),
+            joint_count=int(getattr(message, 'remote_joint_count', 0)),
+            joint_position_raw=tuple(
+                int(value)
+                for value in getattr(message, 'remote_joint_position_raw', ())),
+            joint_load_raw=tuple(
+                int(value)
+                for value in getattr(message, 'remote_joint_load_raw', ())),
             last_seen=now,
             placeholder=False,
         )
@@ -824,10 +859,39 @@ class PlexusTopology(Plugin):
                 ('Result', _format_uint32(node.result_value)),
                 ('XOR validation', 'OK' if node.xor_valid else 'ERROR'),
             ])
+            self._add_category('Remote Spinal IMU', [
+                ('Valid', str(node.imu_valid)),
+                ('Sample timestamp', f'{node.imu_timestamp_ms} ms'),
+                ('Acceleration', ', '.join(f'{value:.6g}' for value in node.acceleration)),
+                ('Angular velocity',
+                 ', '.join(f'{value:.6g}' for value in node.angular_velocity)),
+                ('Magnetic field',
+                 ', '.join(f'{value:.6g}' for value in node.magnetic_field)),
+                ('Quaternion', ', '.join(f'{value:.6g}' for value in node.quaternion)),
+            ])
+            joint_count = min(
+                node.joint_count,
+                len(node.joint_position_raw),
+                len(node.joint_load_raw))
+            self._add_category('Remote Spinal joints', [
+                ('Valid', str(node.joint_valid)),
+                ('Sample timestamp', f'{node.joint_timestamp_ms} ms'),
+                ('Joint count', str(joint_count)),
+                ('Position (raw)',
+                 ', '.join(str(value)
+                           for value in node.joint_position_raw[:joint_count])),
+                ('Load (raw)',
+                 ', '.join(str(value)
+                           for value in node.joint_load_raw[:joint_count])),
+            ])
 
         link = self._model.link
         self._add_category('Spinal–Plexus SPI link', [
             ('Link active', str(link.link_active)),
+            ('Spinal node ID', _format_uint32(link.local_node_id)),
+            ('Plexus node ID', _format_uint32(link.plexus_node_id)),
+            ('Node identity valid', str(link.node_identity_valid)),
+            ('Identity mismatches', str(link.node_identity_mismatches)),
             ('Active RS-485 nodes', str(link.active_node_count)),
             ('SPI module capacity', str(link.module_count)),
             ('Last cycle', str(link.last_received_cycle)),

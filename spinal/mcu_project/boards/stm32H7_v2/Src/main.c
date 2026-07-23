@@ -168,6 +168,64 @@ DirectServoRosModule servo_ros_mod_;
 StateEstimateRosModule estimator_ros_mod_;
 /* FlightControl controller_; */
 
+static uint32_t SpinalNodeIdProvider()
+{
+  return static_cast<uint32_t>(servo_ros_mod_.getServoCore()->getBoardId());
+}
+
+static void SubmitSpinalImuSample()
+{
+  AttitudeEstimate* attitude =
+    estimator_ros_mod_.getStateEstimateCore()->getAttEstimator();
+  if (attitude == nullptr)
+    {
+      return;
+    }
+
+  const ap::Vector3f acceleration = attitude->getAccVec();
+  const ap::Vector3f angular_velocity = attitude->getGyroVec();
+  const ap::Vector3f magnetic_field = attitude->getMagVec();
+  const ap::Quaternion quaternion = attitude->getQuaternion();
+  plexus_link::ImuState imu{};
+  imu.acceleration[0] = acceleration.x;
+  imu.acceleration[1] = acceleration.y;
+  imu.acceleration[2] = acceleration.z;
+  imu.angular_velocity[0] = angular_velocity.x;
+  imu.angular_velocity[1] = angular_velocity.y;
+  imu.angular_velocity[2] = angular_velocity.z;
+  imu.magnetic_field[0] = magnetic_field.x;
+  imu.magnetic_field[1] = magnetic_field.y;
+  imu.magnetic_field[2] = magnetic_field.z;
+  imu.quaternion[0] = quaternion[1];
+  imu.quaternion[1] = quaternion[2];
+  imu.quaternion[2] = quaternion[3];
+  imu.quaternion[3] = quaternion[0];
+  spi_master_link_.submitLocalImuSample(imu, HAL_GetTick());
+}
+
+static void SubmitSpinalJointSample()
+{
+  plexus_link::SpinalJointSample sample{};
+  sample.timestamp_ms = HAL_GetTick();
+  if (servo_ros_mod_.connected())
+    {
+      const unsigned int servo_count = servo_ros_mod_.getServoCore()->getServoNum();
+      sample.count = static_cast<uint8_t>(
+        servo_count < plexus_link::kJointCount
+          ? servo_count
+          : plexus_link::kJointCount);
+      sample.valid = 1U;
+      for (size_t index = 0U; index < sample.count; ++index)
+        {
+          const ServoData& servo =
+            servo_ros_mod_.getServoCore()->getServoData(index);
+          sample.position[index] = static_cast<int16_t>(servo.present_position_);
+          sample.load[index] = servo.present_current_;
+        }
+    }
+  spi_master_link_.submitLocalJointSample(sample);
+}
+
 /* USER CODE END PV */
 
 /* Private function prototypes -----------------------------------------------*/
@@ -491,7 +549,8 @@ int main(void)
     SPI1_CS_Pin,
     spiBusMutexHandle,
     spiStateMutexHandle,
-    spiTransferSemHandle);
+    spiTransferSemHandle,
+    SpinalNodeIdProvider);
   /* add semaphores, ... */
   /* USER CODE END RTOS_SEMAPHORES */
 
@@ -1424,6 +1483,8 @@ void coreTaskFunc(void const * argument)
       baro_ros_mod_.update();
       gps_ros_mod_.update();
       estimator_ros_mod_.update();
+      SubmitSpinalImuSample();
+      SubmitSpinalJointSample();
       flight_control_ros_mod_.update();
       thruster_ros_mod_.sendCommand();
 

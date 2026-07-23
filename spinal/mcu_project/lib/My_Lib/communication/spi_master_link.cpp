@@ -52,7 +52,8 @@ void SpiMasterLink::init(SPI_HandleTypeDef* hspi,
                          uint16_t chip_select_pin,
                          osMutexId bus_mutex,
                          osMutexId state_mutex,
-                         osSemaphoreId completion_semaphore)
+                         osSemaphoreId completion_semaphore,
+                         NodeIdProvider node_id_provider)
 {
   hspi_ = hspi;
   chip_select_port_ = chip_select_port;
@@ -60,12 +61,14 @@ void SpiMasterLink::init(SPI_HandleTypeDef* hspi,
   bus_mutex_ = bus_mutex;
   state_mutex_ = state_mutex;
   completion_semaphore_ = completion_semaphore;
+  node_id_provider_ = node_id_provider;
   HAL_GPIO_WritePin(chip_select_port_, chip_select_pin_, GPIO_PIN_SET);
   drainCompletionSemaphore();
   g_spi_master_link = this;
 }
 
 bool SpiMasterLink::snapshot(ModuleStatePayload& states,
+                             RemoteJointCache& joints,
                              SpiLinkDiagnostics& diagnostics) const
 {
   if (state_mutex_ == nullptr || osMutexWait(state_mutex_, osWaitForever) != osOK)
@@ -74,9 +77,36 @@ bool SpiMasterLink::snapshot(ModuleStatePayload& states,
     }
 
   states = latest_states_;
+  joints = latest_remote_joints_;
   diagnostics = diagnostics_;
   (void)osMutexRelease(state_mutex_);
   return true;
+}
+
+void SpiMasterLink::submitLocalJointSample(const SpinalJointSample& sample)
+{
+  if (!validateSpinalJointSample(sample) || state_mutex_ == nullptr ||
+      osMutexWait(state_mutex_, osWaitForever) != osOK)
+    {
+      return;
+    }
+  latest_local_joint_ = sample;
+  (void)osMutexRelease(state_mutex_);
+}
+
+void SpiMasterLink::submitLocalImuSample(const ImuState& imu, uint32_t timestamp_ms)
+{
+  SpinalImuSample sample{};
+  sample.imu = imu;
+  sample.timestamp_ms = timestamp_ms;
+  sample.valid = 1U;
+  if (!validateSpinalImuSample(sample) || state_mutex_ == nullptr ||
+      osMutexWait(state_mutex_, osWaitForever) != osOK)
+    {
+      return;
+    }
+  latest_local_imu_ = sample;
+  (void)osMutexRelease(state_mutex_);
 }
 
 void SpiMasterLink::setBaudPrescaler(uint32_t prescaler)
@@ -97,8 +127,22 @@ void SpiMasterLink::drainCompletionSemaphore()
 
 void SpiMasterLink::executeCycle()
 {
+  const uint32_t local_node_id = node_id_provider_ != nullptr
+    ? node_id_provider_()
+    : kUnassignedNodeId;
+  SpinalImuSample local_imu{};
+  SpinalJointSample local_joint{};
+  if (state_mutex_ != nullptr && osMutexWait(state_mutex_, osWaitForever) == osOK)
+    {
+      local_imu = latest_local_imu_;
+      local_joint = latest_local_joint_;
+      (void)osMutexRelease(state_mutex_);
+    }
   fillVirtualCommandPayload(command_payload_, cycle_counter_);
-  buildFrame(tx_frame_, FrameDirection::SpinalToPlexus, cycle_counter_, HAL_GetTick(),
+  command_payload_.local_imu = local_imu;
+  command_payload_.local_joint = local_joint;
+  buildFrame(tx_frame_, FrameDirection::SpinalToPlexus, local_node_id,
+             cycle_counter_, HAL_GetTick(),
              command_payload_);
   std::memset(&rx_frame_, 0, sizeof(rx_frame_));
 
@@ -130,6 +174,8 @@ void SpiMasterLink::executeCycle()
   bool invalid_frame = false;
   bool semantic_error = false;
   bool cycle_mismatch = false;
+  bool identity_mismatch = false;
+  uint32_t plexus_node_id = kUnassignedNodeId;
   if (start_status == HAL_OK)
     {
       completed = osSemaphoreWait(completion_semaphore_, kTransferTimeoutMs) == osOK &&
@@ -169,6 +215,9 @@ void SpiMasterLink::executeCycle()
       else
         {
           valid_frame = true;
+          plexus_node_id = rx_frame_.header.source_node_id;
+          identity_mismatch = !isValidNodeId(local_node_id) ||
+                              plexus_node_id != local_node_id;
 
           if (rx_frame_.header.cycle_counter != cycle_counter_)
             {
@@ -182,18 +231,53 @@ void SpiMasterLink::executeCycle()
     }
 
   (void)osMutexWait(state_mutex_, osWaitForever);
+  diagnostics_.local_node_id = local_node_id;
+  diagnostics_.plexus_node_id = plexus_node_id;
+  diagnostics_.node_identity_mismatches += identity_mismatch ? 1U : 0U;
   ++diagnostics_.attempted_transfers;
   diagnostics_.completed_transfers += completed ? 1U : 0U;
-  diagnostics_.valid_frames += valid_frame ? 1U : 0U;
+  const bool accepted_frame = valid_frame && !identity_mismatch && !semantic_error;
+  diagnostics_.valid_frames += accepted_frame ? 1U : 0U;
   diagnostics_.invalid_frames += invalid_frame ? 1U : 0U;
   diagnostics_.semantic_errors += semantic_error ? 1U : 0U;
   diagnostics_.cycle_mismatches += cycle_mismatch ? 1U : 0U;
   diagnostics_.dma_start_errors += dma_start_error ? 1U : 0U;
   diagnostics_.timeouts += timeout ? 1U : 0U;
   diagnostics_.peripheral_errors += peripheral_error ? 1U : 0U;
-  if (valid_frame)
+  if (accepted_frame)
     {
       latest_states_ = decoded_states_;
+      const RemoteJointSampleEnvelope& envelope = decoded_states_.remote_joint;
+      if (isValidNodeId(envelope.node_id))
+        {
+          size_t cache_index = kRemoteNodeCapacity;
+          size_t oldest_index = 0U;
+          for (size_t index = 0U; index < kRemoteNodeCapacity; ++index)
+            {
+              if (latest_remote_joints_.entries[index].node_id == envelope.node_id)
+                {
+                  cache_index = index;
+                  break;
+                }
+              if (cache_index == kRemoteNodeCapacity &&
+                  latest_remote_joints_.entries[index].node_id == kUnassignedNodeId)
+                {
+                  cache_index = index;
+                }
+              if (latest_remote_joints_.entries[index].received_tick_ms <
+                  latest_remote_joints_.entries[oldest_index].received_tick_ms)
+                {
+                  oldest_index = index;
+                }
+            }
+          if (cache_index == kRemoteNodeCapacity)
+            {
+              cache_index = oldest_index;
+            }
+          latest_remote_joints_.entries[cache_index].node_id = envelope.node_id;
+          latest_remote_joints_.entries[cache_index].sample = envelope.sample;
+          latest_remote_joints_.entries[cache_index].received_tick_ms = HAL_GetTick();
+        }
       diagnostics_.last_received_cycle = rx_frame_.header.cycle_counter;
       diagnostics_.last_received_timestamp_ms = rx_frame_.header.timestamp_ms;
       diagnostics_.last_valid_frame_tick_ms = HAL_GetTick();

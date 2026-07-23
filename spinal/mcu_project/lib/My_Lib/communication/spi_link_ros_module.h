@@ -33,6 +33,7 @@ private:
   rcl_publisher_t publisher_{};
   spinal_msgs__msg__SpiLinkState message_{};
   ModuleStatePayload state_snapshot_{};
+  RemoteJointCache joint_snapshot_{};
   SpiLinkDiagnostics diagnostics_snapshot_{};
   uint32_t last_publish_tick_ms_{0U};
   uint8_t next_module_index_{static_cast<uint8_t>(kFirstRemoteNodeSlot)};
